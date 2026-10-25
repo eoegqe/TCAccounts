@@ -1,23 +1,13 @@
-# TC central database
+# TC Accounts
 
-This D1 database is named `TC` and is initially connected to the TCAccounts Worker through the `TC` binding.
+React/Vite frontend with a Cloudflare Worker API and Cloudflare D1 database binding named `TC`.
 
-## Apply the initial schema
+API routes: `GET /api/health`, `POST /api/register`, `POST /api/login`, `GET /api/me`, `POST /api/logout`, and authenticated `GET /api/accounts`.
 
-From the repository root, with Wrangler installed and authenticated:
+Passwords use PBKDF2-SHA-256; random session tokens are stored only as SHA-256 hashes and delivered as Secure, HttpOnly, SameSite=Lax cookies. Unauthenticated visitors to `/accounts` are prompted to sign in.
 
-```sh
-npx wrangler d1 migrations apply TC --remote
-```
+The manually created `users` table must have integer `id`, `username`, `email`, `password_hash`, `email_verified_at`, `status`, `created_at`, and `updated_at` columns. The migration creates the other tables and unique username/email indexes. Do not drop or recreate the manually created table.
 
-For local development, use:
+Apply the migration only after confirming the existing users table has those columns: `npx wrangler d1 migrations apply TC --remote`.
 
-```sh
-npx wrangler d1 migrations apply TC --local
-```
-
-The initial schema includes TC Accounts users, sessions, verification and recovery tokens, registered applications, connected accounts, and audit logs.
-
-The API currently exposes only `GET /api/health` to verify that the Worker can query D1. Registration and login are intentionally not enabled until password hashing, email delivery, rate limiting, session cookies, and recovery flows are implemented and tested.
-
-Never store plaintext passwords, session tokens, verification tokens, or password-reset tokens. Store only password hashes or hashes of random tokens.
+The Worker must be deployed and routed to the frontend's same origin under `/api/*`. For a different frontend origin, set `ALLOWED_ORIGINS` to the exact origin and configure cookies for that deployment. Email verification, password reset, and server-side rate limiting are not implemented yet.
