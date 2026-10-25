@@ -18,4 +18,4 @@ if(url.pathname==="/api/login"&&request.method==="POST"){const b=await body(requ
 if(url.pathname==="/api/me"&&request.method==="GET"){try{const u=await session(request,env);return u?json({user:{id:u.user_id,username:u.username,email:u.email,status:u.status}}):json({error:"not_authenticated"},401)}catch{return json({error:"session_unavailable"},503)}}
 if(url.pathname==="/api/logout"&&request.method==="POST"){const t=getCookie(request);try{if(t)await env.TC.prepare("DELETE FROM sessions WHERE id_hash=?").bind(await hash(t)).run();return json({success:true},200,{"set-cookie":cookie("",0)})}catch{return json({error:"logout_failed"},503)}}
 if(url.pathname==="/api/accounts"&&request.method==="GET"){try{const u=await session(request,env);return u?json({user:{id:u.user_id,username:u.username,email:u.email,status:u.status},message:"Signed in to TC Accounts."}):json({error:"not_authenticated"},401)}catch{return json({error:"accounts_unavailable"},503)}}
-return json({error:"not_found"},404)}};
+if(url.pathname.startsWith("/api/"))return json({error:"not_found"},404);return env.ASSETS.fetch(request)}};
