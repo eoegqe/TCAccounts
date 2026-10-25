@@ -113,7 +113,8 @@ export default function App() {
         : await request("/login", { method: "POST", body: JSON.stringify({ identifier: identifier.trim(), password }) });
       setUser(result.user || null);
       setPassword("");
-      navigate("/accounts");
+      const returnTo = new URLSearchParams(window.location.search).get("return_to");
+      navigate(returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/accounts");
     } catch (error) {
       setMessage(error.message || "We couldn't complete that request.");
       setMessageType("error");
