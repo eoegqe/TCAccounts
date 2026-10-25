@@ -1,102 +1,18 @@
-import { useState } from "react";
-
-function Brand() {
-  return (
-    <a className="brand" href="/" aria-label="TC Accounts home">
-      <span className="brand-mark">TC</span>
-      <span className="brand-name">TC Accounts</span>
-    </a>
-  );
-}
-
-function Field({ label, type = "text", placeholder, value, onChange, autoComplete }) {
-  return (
-    <label className="field">
-      <span>{label}</span>
-      <input
-        type={type}
-        placeholder={placeholder}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        autoComplete={autoComplete}
-        required
-      />
-    </label>
-  );
-}
-
-export default function App() {
-  const [mode, setMode] = useState("login");
-  const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [notice, setNotice] = useState("");
-
-  const isRegister = mode === "register";
-
-  function switchMode(nextMode) {
-    setMode(nextMode);
-    setNotice("");
-  }
-
-  function handleSubmit(event) {
-    event.preventDefault();
-    setNotice("The interface is ready, but account creation and sign-in are not connected to a secure backend yet.");
-  }
-
-  return (
-    <div className="app-shell">
-      <header className="topbar">
-        <Brand />
-        <a className="top-link" href="https://creations.theegget.com">Theegget Creations <span aria-hidden="true">↗</span></a>
-      </header>
-
-      <main className="main-content">
-        <section className="intro">
-          <div className="eyebrow"><span className="status-dot" /> THEEGGET CREATIONS</div>
-          <h1>One account.<br /><span>Everywhere TC.</span></h1>
-          <p>Your TC Account gives you one identity to use across participating Theegget Creations products and services.</p>
-          <div className="benefits">
-            <div><span className="benefit-icon">01</span><span><strong>Your account, your way</strong><small>Create your account directly with TC.</small></span></div>
-            <div><span className="benefit-icon">02</span><span><strong>Login with TC</strong><small>Use the same account on supported platforms.</small></span></div>
-            <div><span className="benefit-icon">03</span><span><strong>You're in control</strong><small>Manage your profile and connected apps.</small></span></div>
-          </div>
-        </section>
-
-        <section className="auth-card" aria-labelledby="form-title">
-          <div className="card-topline"><span>TC ACCOUNT</span><span className="secure-label">PRIVATE BY DESIGN</span></div>
-          <div className="mode-switch" role="tablist" aria-label="Account access">
-            <button type="button" role="tab" aria-selected={!isRegister} className={!isRegister ? "active" : ""} onClick={() => switchMode("login")}>Sign in</button>
-            <button type="button" role="tab" aria-selected={isRegister} className={isRegister ? "active" : ""} onClick={() => switchMode("register")}>Create account</button>
-          </div>
-
-          <div className="form-heading">
-            <h2 id="form-title">{isRegister ? "Create your TC Account" : "Welcome back."}</h2>
-            <p>{isRegister ? "Register directly with Theegget Creations." : "Sign in with your TC credentials."}</p>
-          </div>
-
-          <form onSubmit={handleSubmit}>
-            {isRegister && <Field label="TC username" placeholder="Choose a username" value={username} onChange={setUsername} autoComplete="username" />}
-            {!isRegister && <Field label="TC username or email" placeholder="Enter your username or email" value={username} onChange={setUsername} autoComplete="username" />}
-            {isRegister && <Field label="Email address" type="email" placeholder="you@example.com" value={email} onChange={setEmail} autoComplete="email" />}
-            <Field label="Password" type="password" placeholder={isRegister ? "Create a strong password" : "Enter your password"} value={password} onChange={setPassword} autoComplete={isRegister ? "new-password" : "current-password"} />
-            {isRegister && <p className="field-note">Use an email address you already own. TC employee email addresses are reserved for employees.</p>}
-            {!isRegister && <button className="forgot-link" type="button" onClick={() => setNotice("Password recovery will be available once the secure account backend is connected.")}>Forgot password?</button>}
-            <button className="primary-button" type="submit">{isRegister ? "Create TC Account" : "Sign in"} <span aria-hidden="true">→</span></button>
-          </form>
-
-          {notice && <div className="notice" role="status">{notice}</div>}
-
-          <div className="divider"><span>TC IDENTITY</span></div>
-          <p className="no-external">TC Accounts are created directly with TC. External accounts such as Google, Microsoft, and Apple cannot be used to create a TC Account.</p>
-          <p className="switch-prompt">{isRegister ? "Already have a TC Account?" : "New to TC Accounts?"} <button type="button" onClick={() => switchMode(isRegister ? "login" : "register")}>{isRegister ? "Sign in" : "Create one"}</button></p>
-        </section>
-      </main>
-
-      <footer className="footer">
-        <span>© {new Date().getFullYear()} Theegget Creations</span>
-        <span>TC Accounts <span className="footer-separator">/</span> Identity</span>
-      </footer>
-    </div>
-  );
+import { useEffect, useState } from "react";
+function Brand(){return <a className="brand" href="/" aria-label="TC Accounts home"><span className="brand-mark">TC</span><span className="brand-name">TC Accounts</span></a>}
+function Field({label,type="text",placeholder,value,onChange,autoComplete,minLength}){return <label className="field"><span>{label}</span><input type={type} placeholder={placeholder} value={value} onChange={e=>onChange(e.target.value)} autoComplete={autoComplete} minLength={minLength} required /></label>}
+async function api(path,options={}){const r=await fetch(path,{...options,credentials:"include",headers:{"content-type":"application/json",...options.headers}});const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.message||"Something went wrong. Please try again.");return data}
+export default function App(){
+const [mode,setMode]=useState("login"),[username,setUsername]=useState(""),[email,setEmail]=useState(""),[password,setPassword]=useState(""),[notice,setNotice]=useState(""),[busy,setBusy]=useState(false),[user,setUser]=useState(null),[checking,setChecking]=useState(true),[path,setPath]=useState(location.pathname);
+useEffect(()=>{const pop=()=>setPath(location.pathname);addEventListener("popstate",pop);return()=>removeEventListener("popstate",pop)},[]);
+useEffect(()=>{let alive=true;api("/api/me").then(d=>{if(alive)setUser(d.user)}).catch(()=>{if(alive)setUser(null)}).finally(()=>{if(alive)setChecking(false)});return()=>{alive=false}},[]);
+const registering=mode==="register",accounts=path==="/accounts"||path.startsWith("/accounts/");
+function navigate(p){history.pushState({},"",p);setPath(p);setNotice("")}
+function switchMode(m){setMode(m);setNotice("");setPassword("")}
+async function submit(e){e.preventDefault();setNotice("");setBusy(true);try{const d=registering?await api("/api/register",{method:"POST",body:JSON.stringify({username,email,password})}):await api("/api/login",{method:"POST",body:JSON.stringify({identifier:username,password})});setUser(d.user);setPassword("");navigate("/accounts")}catch(e){setNotice(e.message)}finally{setBusy(false)}}
+async function logout(){setBusy(true);try{await api("/api/logout",{method:"POST",body:"{}"});setUser(null);setPassword("");setUsername("");navigate("/")}catch(e){setNotice(e.message)}finally{setBusy(false)}}
+if(checking)return <div className="app-shell"><header className="topbar"><Brand/></header><main className="main-content"><p>Checking your TC Account session…</p></main></div>;
+if(accounts&&!user)return <div className="app-shell"><header className="topbar"><Brand/><a className="top-link" href="https://creations.theegget.com">Theegget Creations ↗</a></header><main className="main-content"><section className="auth-card"><div className="card-topline"><span>TC ACCOUNT</span><span className="secure-label">SIGN-IN REQUIRED</span></div><div className="form-heading"><h2>Sign in to continue.</h2><p>You must sign in to access your TC Accounts page.</p></div><button className="primary-button" onClick={()=>navigate("/")}>Go to sign in <span>→</span></button></section></main><footer className="footer"><span>© {new Date().getFullYear()} Theegget Creations</span><span>TC Accounts / Identity</span></footer></div>;
+if(accounts&&user)return <div className="app-shell"><header className="topbar"><Brand/><button className="top-link" onClick={logout} disabled={busy}>Sign out</button></header><main className="main-content"><section className="auth-card"><div className="card-topline"><span>TC ACCOUNT</span><span className="secure-label">SIGNED IN</span></div><div className="form-heading"><h2>Your account.</h2><p>You are signed in to Theegget Creations.</p></div><div className="account-details"><div><span>Username</span><strong>{user.username}</strong></div><div><span>Email address</span><strong>{user.email}</strong></div><div><span>Account status</span><strong>{user.status}</strong></div><div><span>TC user ID</span><strong>{user.id}</strong></div></div>{notice&&<div className="notice" role="status">{notice}</div>}</section></main><footer className="footer"><span>© {new Date().getFullYear()} Theegget Creations</span><span>TC Accounts / Identity</span></footer></div>;
+return <div className="app-shell"><header className="topbar"><Brand/><a className="top-link" href="https://creations.theegget.com">Theegget Creations <span aria-hidden="true">↗</span></a></header><main className="main-content"><section className="intro"><div className="eyebrow"><span className="status-dot"/> THEEGGET CREATIONS</div><h1>One account.<br/><span>Everywhere TC.</span></h1><p>Your TC Account gives you one identity to use across participating Theegget Creations products and services.</p><div className="benefits"><div><span className="benefit-icon">01</span><span><strong>Your account, your way</strong><small>Create your account directly with TC.</small></span></div><div><span className="benefit-icon">02</span><span><strong>Login with TC</strong><small>Use the same account on supported platforms.</small></span></div><div><span className="benefit-icon">03</span><span><strong>You're in control</strong><small>Manage your profile and connected apps.</small></span></div></div></section><section className="auth-card" aria-labelledby="form-title"><div className="card-topline"><span>TC ACCOUNT</span><span className="secure-label">PRIVATE BY DESIGN</span></div><div className="mode-switch" role="tablist" aria-label="Account access"><button type="button" role="tab" aria-selected={!registering} className={!registering?"active":""} onClick={()=>switchMode("login")}>Sign in</button><button type="button" role="tab" aria-selected={registering} className={registering?"active":""} onClick={()=>switchMode("register")}>Create account</button></div><div className="form-heading"><h2 id="form-title">{registering?"Create your TC Account":"Welcome back."}</h2><p>{registering?"Register directly with Theegget Creations.":"Sign in with your TC credentials."}</p></div><form onSubmit={submit}>{registering?<Field label="TC username" placeholder="Choose a username" value={username} onChange={setUsername} autoComplete="username" minLength={3}/>:<Field label="TC username or email" placeholder="Enter your username or email" value={username} onChange={setUsername} autoComplete="username"/>}{registering&&<Field label="Email address" type="email" placeholder="you@example.com" value={email} onChange={setEmail} autoComplete="email"/>}<Field label="Password" type="password" placeholder={registering?"Create a password (12+ characters)":"Enter your password"} value={password} onChange={setPassword} autoComplete={registering?"new-password":"current-password"} minLength={registering?12:undefined}/>{registering&&<p className="field-note">Use an email address you own. Passwords are stored as secure hashes, never as plain text.</p>}{!registering&&<button className="forgot-link" type="button" onClick={()=>setNotice("Password recovery is not connected yet.")}>Forgot password?</button>}<button className="primary-button" type="submit" disabled={busy}>{busy?"Please wait…":registering?"Create TC Account":"Sign in"} <span>→</span></button></form>{notice&&<div className="notice" role="status">{notice}</div>}<div className="divider"><span>TC IDENTITY</span></div><p className="no-external">TC Accounts are created directly with TC. External accounts such as Google, Microsoft, and Apple cannot be used to create a TC Account.</p><p className="switch-prompt">{registering?"Already have a TC Account?":"New to TC Accounts?"} <button type="button" onClick={()=>switchMode(registering?"login":"register")}>{registering?"Sign in":"Create one"}</button></p></section></main><footer className="footer"><span>© {new Date().getFullYear()} Theegget Creations</span><span>TC Accounts <span className="footer-separator">/</span> Identity</span></footer></div>
 }
