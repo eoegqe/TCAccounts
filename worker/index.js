@@ -1,6 +1,6 @@
 const json=(data,status=200,headers={})=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff",...headers}});
 const enc=new TextEncoder(), COOKIE="tc_session", AGE=2592000;
-const b64=b=>{let s="";for(const x of b)s+=String.fromCharCode(x);return btoa(s).replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/g,"")};
+const b64=b=>{let s="";for(const x of b)s+=String.fromCharCode(x);return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"")};
 const random=(n=32)=>{const b=new Uint8Array(n);crypto.getRandomValues(b);return b64(b)};
 const hash=async s=>b64(new Uint8Array(await crypto.subtle.digest("SHA-256",enc.encode(s))));
 async function passwordHash(p,s=random(16)){const k=await crypto.subtle.importKey("raw",enc.encode(p),"PBKDF2",false,["deriveBits"]);const bits=await crypto.subtle.deriveBits({name:"PBKDF2",hash:"SHA-256",salt:enc.encode(s),iterations:310000},k,256);return `pbkdf2_sha256$310000$${s}$${b64(new Uint8Array(bits))}`;}
