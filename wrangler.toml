@@ -1,6 +1,11 @@
-name = "tcaccounts-api"
+name = "tcaccounts"
 main = "worker/index.js"
 compatibility_date = "2026-10-25"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
 
 [[d1_databases]]
 binding = "TC"
@@ -8,4 +13,4 @@ database_name = "TC"
 database_id = "fd0e9d90-b443-4002-8378-f0d817fb415b"
 
 [vars]
-APP_ENV = "development"
+APP_ENV = "production"
