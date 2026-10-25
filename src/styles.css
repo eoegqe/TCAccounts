@@ -22,3 +22,14 @@ form{display:grid;gap:16px}.field{display:grid;gap:8px;font-size:11px;color:#ccc
 .footer{border-top:1px solid #202020;padding:21px 6%;display:flex;justify-content:space-between;color:#666;font-size:10px}.footer i{font-style:normal;color:#444;padding:0 6px}
 @media(max-width:800px){.layout{grid-template-columns:1fr;max-width:470px;gap:35px;padding:44px 0 55px}.welcome{max-width:none}h1{font-size:clamp(42px,10vw,58px);margin-top:18px}.feature-list{gap:16px;margin-top:25px}.header{height:66px}.panel{padding:23px}}
 @media(max-width:420px){.layout{width:90%;padding-top:35px}.panel{padding:19px}.footer{font-size:9px}.brand{font-size:13px}}
+
+.field textarea{width:100%;resize:vertical;min-height:88px;border:1px solid #303030;border-radius:8px;background:#080808;color:#fff;padding:12px;font:12px/1.6 "DM Sans",Arial,sans-serif;outline:none}
+.field textarea:focus{border-color:#888;box-shadow:0 0 0 3px #ffffff0b}
+h3{font-family:Manrope,Arial,sans-serif;font-size:16px;letter-spacing:-.03em;margin:28px 0 8px}
+.oauth-client-list{display:grid;gap:10px;margin-top:18px}
+.oauth-client{display:grid;gap:7px;padding:13px;border:1px solid #2b2b2b;border-radius:9px;background:#090909;min-width:0}
+.oauth-client strong{font-size:12px}
+.oauth-client small{font-size:10px;color:#888;margin-top:3px}
+.oauth-client code{display:block;max-width:100%;overflow-wrap:anywhere;white-space:normal;border-radius:5px;background:#151515;padding:7px;color:#ddd;font-size:10px}
+.oauth-client .text-button{justify-self:start;margin-top:5px}
+.text-button.danger{color:#ffaaaa}
