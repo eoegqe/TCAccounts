@@ -57,3 +57,5 @@ form{display:grid;gap:16px}
 .footer-separator{padding:0 8px;color:#3e3e3e}
 @media(max-width:800px){.main-content{grid-template-columns:1fr;max-width:480px;gap:38px;padding:50px 0 60px}.intro{max-width:none}.intro>p{max-width:460px}h1{font-size:clamp(42px,10vw,58px);margin-top:19px}.benefits{grid-template-columns:1fr;gap:17px;margin-top:28px}.auth-card{padding:23px}.topbar{height:66px}.footer{padding:19px 6%}}
 @media(max-width:420px){.main-content{width:90%;padding-top:38px}.auth-card{padding:19px}.secure-label{font-size:7px}.footer{font-size:9px}.brand-name{font-size:14px}}
+
+.account-details{display:grid;gap:0;border:1px solid #292929;border-radius:9px;overflow:hidden;margin-top:20px}.account-details>div{display:flex;justify-content:space-between;gap:16px;padding:14px 12px;border-bottom:1px solid #242424;font-size:11px}.account-details>div:last-child{border-bottom:0}.account-details span{color:#858585}.account-details strong{font-weight:600;text-align:right;overflow-wrap:anywhere}button:disabled{opacity:.55;cursor:wait}
