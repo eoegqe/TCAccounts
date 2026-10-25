@@ -1,0 +1,11 @@
+name = "tcaccounts-api"
+main = "worker/index.js"
+compatibility_date = "2026-10-25"
+
+[[d1_databases]]
+binding = "TC"
+database_name = "TC"
+database_id = "fd0e9d90-b443-4002-8378-f0d817fb415b"
+
+[vars]
+APP_ENV = "development"
