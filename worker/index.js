@@ -3,7 +3,7 @@ const enc=new TextEncoder(), COOKIE="tc_session", AGE=2592000;
 const b64=b=>{let s="";for(const x of b)s+=String.fromCharCode(x);return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"")};
 const random=(n=32)=>{const b=new Uint8Array(n);crypto.getRandomValues(b);return b64(b)};
 const hash=async s=>b64(new Uint8Array(await crypto.subtle.digest("SHA-256",enc.encode(s))));
-async function passwordHash(p,s=random(16)){const rounds=100000;const k=await crypto.subtle.importKey("raw",enc.encode(p),"PBKDF2",false,["deriveBits"]);const bits=await crypto.subtle.deriveBits({name:"PBKDF2",hash:"SHA-256",salt:enc.encode(s),iterations:rounds},k,256);return `pbkdf2_sha256${rounds}${s}${b64(new Uint8Array(bits))}`;}
+async function passwordHash(p,s=random(16)){const rounds=100000;const k=await crypto.subtle.importKey("raw",enc.encode(p),"PBKDF2",false,["deriveBits"]);const bits=await crypto.subtle.deriveBits({name:"PBKDF2",hash:"SHA-256",salt:enc.encode(s),iterations:rounds},k,256);return "pbkdf2_sha256$"+rounds+"$"+s+"$"+b64(new Uint8Array(bits));}
 async function verify(p,stored){try{const [scheme,rounds,salt]=stored.split("$");return scheme==="pbkdf2_sha256"&&rounds==="100000"&&(await passwordHash(p,salt))===stored}catch{return false}}
 const cookie=(v,age)=>`${COOKIE}=${v}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${age}`;
 function getCookie(req){for(const p of (req.headers.get("cookie")||"").split(";")){const i=p.indexOf("=");if(i>=0&&p.slice(0,i).trim()===COOKIE)return p.slice(i+1).trim()}return ""}
