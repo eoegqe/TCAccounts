@@ -32,6 +32,10 @@ export default function App() {
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("info");
   const [path, setPath] = useState(window.location.pathname);
+  const [oauthClients, setOauthClients] = useState([]);
+  const [clientName, setClientName] = useState("");
+  const [redirectUris, setRedirectUris] = useState("");
+  const [clientBusy, setClientBusy] = useState(false);
 
   useEffect(() => {
     const onPopState = () => setPath(window.location.pathname);
@@ -50,6 +54,40 @@ export default function App() {
     });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (!user || path !== "/accounts") return;
+    let active = true;
+    request("/oauth/clients").then(result => { if (active) setOauthClients(result.clients || []); }).catch(error => { if (active) { setOauthClients([]); setMessage(error.message || "OAuth applications could not be loaded."); setMessageType("error"); } });
+    return () => { active = false; };
+  }, [user, path]);
+
+  async function createOAuthClient(event) {
+    event.preventDefault();
+    setClientBusy(true);
+    setMessage("");
+    try {
+      const result = await request("/oauth/clients", { method: "POST", body: JSON.stringify({ name: clientName.trim(), redirect_uris: redirectUris.split("\\n").map(x => x.trim()).filter(Boolean), scopes: ["profile", "email"] }) });
+      setOauthClients(items => [result.client, ...items]);
+      setClientName("");
+      setRedirectUris("");
+      setMessage("OAuth application registered. Save its client ID.");
+      setMessageType("info");
+    } catch (error) {
+      setMessage(error.message || "Could not register application.");
+      setMessageType("error");
+    } finally { setClientBusy(false); }
+  }
+
+  async function deleteOAuthClient(clientId) {
+    if (!window.confirm("Revoke and delete this OAuth application? Existing tokens for it will no longer be usable.")) return;
+    try {
+      await request("/oauth/clients/" + encodeURIComponent(clientId), { method: "DELETE", body: "{}" });
+      setOauthClients(items => items.filter(item => item.client_id !== clientId));
+      setMessage("OAuth application deleted.");
+      setMessageType("info");
+    } catch (error) { setMessage(error.message || "Could not delete application."); setMessageType("error"); }
+  }
 
   const accountsPage = path === "/accounts" || path.startsWith("/accounts/");
 
@@ -133,6 +171,24 @@ export default function App() {
                 <div><span>Email</span><strong>{user.email}</strong></div>
                 <div><span>Status</span><strong>{user.status}</strong></div>
                 <div><span>TC user ID</span><strong>{user.id}</strong></div>
+              </div>
+              <h3>OAuth applications</h3>
+              <p className="muted">Register apps that use TC Accounts sign-in. Each redirect URL must match exactly.</p>
+              <form onSubmit={createOAuthClient}>
+                <TextField label="Application name" value={clientName} onChange={event => setClientName(event.target.value)} placeholder="Eggser Control Center" minLength={2} maxLength={80} />
+                <label className="field"><span>Redirect URLs (one per line)</span><textarea required rows={3} value={redirectUris} onChange={event => setRedirectUris(event.target.value)} placeholder="https://your-app.example/oauth/callback" /></label>
+                <button className="button" type="submit" disabled={clientBusy}>{clientBusy ? "Registering…" : "Register OAuth application"} <span>→</span></button>
+              </form>
+              <div className="oauth-client-list">
+                {oauthClients.length === 0 ? <p className="muted">No registered OAuth applications yet.</p> : oauthClients.map(client => <div className="oauth-client" key={client.client_id}>
+                  <strong>{client.name}</strong>
+                  <small>Client ID</small>
+                  <code>{client.client_id}</code>
+                  <small>Redirect URLs</small>
+                  {(client.redirect_uris || []).map(uri => <code key={uri}>{uri}</code>)}
+                  <small>Scopes: {(client.scopes || []).join(", ")}</small>
+                  <button type="button" className="text-button danger" onClick={() => deleteOAuthClient(client.client_id)}>Delete application</button>
+                </div>)}
               </div>
               {message && <p className={`message ${messageType}`} role="status">{message}</p>}
               <button className="button secondary" disabled={busy} onClick={logout}>{busy ? "Signing out…" : "Sign out"}</button>
