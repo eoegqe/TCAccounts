@@ -1,45 +1,21 @@
-const json = (data, status = 200) =>
-  new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-      "x-content-type-options": "nosniff"
-    }
-  });
-
-export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-
-    if (request.method === "OPTIONS") {
-      return new Response(null, {
-        status: 204,
-        headers: {
-          "access-control-allow-methods": "GET, POST, OPTIONS",
-          "access-control-allow-headers": "content-type",
-          "access-control-max-age": "86400",
-          "vary": "Origin"
-        }
-      });
-    }
-
-    if (url.pathname === "/api/health" && request.method === "GET") {
-      try {
-        const result = await env.TC.prepare("SELECT 1 AS ok").first();
-        return json({
-          service: "TCAccounts API",
-          status: result?.ok === 1 ? "ok" : "database_unavailable",
-          environment: env.APP_ENV || "unknown"
-        }, result?.ok === 1 ? 200 : 503);
-      } catch {
-        return json({
-          service: "TCAccounts API",
-          status: "database_unavailable"
-        }, 503);
-      }
-    }
-
-    return json({ error: "not_found" }, 404);
-  }
-};
+const json=(data,status=200,headers={})=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff",...headers}});
+const enc=new TextEncoder(), COOKIE="tc_session", AGE=2592000;
+const b64=b=>{let s="";for(const x of b)s+=String.fromCharCode(x);return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"")};
+const random=(n=32)=>{const b=new Uint8Array(n);crypto.getRandomValues(b);return b64(b)};
+const hash=async s=>b64(new Uint8Array(await crypto.subtle.digest("SHA-256",enc.encode(s))));
+async function passwordHash(p,s=random(16)){const k=await crypto.subtle.importKey("raw",enc.encode(p),"PBKDF2",false,["deriveBits"]);const bits=await crypto.subtle.deriveBits({name:"PBKDF2",hash:"SHA-256",salt:enc.encode(s),iterations:310000},k,256);return `pbkdf2_sha256$310000$${s}$${b64(new Uint8Array(bits))}`;}
+async function verify(p,stored){try{const [scheme,rounds,salt]=stored.split("$");return scheme==="pbkdf2_sha256"&&rounds==="310000"&&(await passwordHash(p,salt))===stored}catch{return false}}
+const cookie=(v,age)=>`${COOKIE}=${v}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${age}`;
+function getCookie(req){for(const p of (req.headers.get("cookie")||"").split(";")){const i=p.indexOf("=");if(i>=0&&p.slice(0,i).trim()===COOKIE)return p.slice(i+1).trim()}return ""}
+function originOk(req,env){const o=req.headers.get("origin");if(!o)return true;try{if(new URL(o).origin===new URL(req.url).origin)return true;return (env.ALLOWED_ORIGINS||"").split(",").map(x=>x.trim()).includes(new URL(o).origin)}catch{return false}}
+async function body(req){try{return await req.json()}catch{return null}}
+async function session(req,env){const t=getCookie(req);if(!t)return null;const h=await hash(t),now=new Date().toISOString();const u=await env.TC.prepare("SELECT s.id_hash,s.user_id,u.username,u.email,u.status FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id_hash=? AND s.expires_at>? AND u.status='active'").bind(h,now).first();if(u)await env.TC.prepare("UPDATE sessions SET last_seen_at=? WHERE id_hash=?").bind(now,h).run();return u}
+async function createSession(env,userId){const token=random(),now=new Date().toISOString(),expires=new Date(Date.now()+AGE*1000).toISOString();await env.TC.prepare("INSERT INTO sessions(id_hash,user_id,expires_at,created_at,last_seen_at) VALUES(?,?,?,?,?)").bind(await hash(token),userId,expires,now,now).run();return token}
+export default {async fetch(request,env){const url=new URL(request.url);if(!originOk(request,env))return json({error:"origin_not_allowed"},403);if(request.method==="OPTIONS")return new Response(null,{status:204,headers:{"access-control-allow-methods":"GET, POST, OPTIONS","access-control-allow-headers":"content-type","access-control-max-age":"86400","vary":"Origin"}});
+if(url.pathname==="/api/health"&&request.method==="GET"){try{const r=await env.TC.prepare("SELECT 1 AS ok").first();return json({service:"TCAccounts API",status:r?.ok===1?"ok":"database_unavailable",environment:env.APP_ENV||"unknown"},r?.ok===1?200:503)}catch{return json({status:"database_unavailable"},503)}}
+if(url.pathname==="/api/register"&&request.method==="POST"){const b=await body(request),username=typeof b?.username==="string"?b.username.trim():"",email=typeof b?.email==="string"?b.email.trim().toLowerCase():"",password=typeof b?.password==="string"?b.password:"";if(username.length<3||username.length>32||!/^[a-zA-Z0-9_.-]+$/.test(username))return json({error:"invalid_username",message:"Use 3–32 letters, numbers, dots, underscores, or hyphens."},400);if(email.length>254||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return json({error:"invalid_email",message:"Enter a valid email address."},400);if(password.length<12||password.length>128)return json({error:"invalid_password",message:"Password must be at least 12 characters."},400);try{const now=new Date().toISOString(),u=await env.TC.prepare("INSERT INTO users(username,email,password_hash,status,created_at,updated_at) VALUES(?,?,?,?,?,?) RETURNING id,username,email,status,created_at").bind(username,email,await passwordHash(password),"active",now,now).first(),token=await createSession(env,u.id);return json({user:u},201,{"set-cookie":cookie(token,AGE)})}catch(e){if(String(e?.message).toLowerCase().includes("unique"))return json({error:"account_exists",message:"That username or email is already in use."},409);return json({error:"registration_failed",message:"Could not create account. The database tables may not be fully set up."},500)}}
+if(url.pathname==="/api/login"&&request.method==="POST"){const b=await body(request),id=typeof b?.identifier==="string"?b.identifier.trim():"",p=typeof b?.password==="string"?b.password:"";if(!id||!p)return json({error:"missing_credentials",message:"Enter your username/email and password."},400);try{const u=await env.TC.prepare("SELECT id,username,email,password_hash,status FROM users WHERE username=? COLLATE NOCASE OR email=? COLLATE NOCASE LIMIT 1").bind(id,id).first();if(!u||u.status!=="active"||!(await verify(p,u.password_hash)))return json({error:"invalid_credentials",message:"The username/email or password is incorrect."},401);const token=await createSession(env,u.id);return json({user:{id:u.id,username:u.username,email:u.email,status:u.status}},200,{"set-cookie":cookie(token,AGE)})}catch{return json({error:"login_unavailable",message:"Sign-in is unavailable. Check that the database tables are set up."},503)}}
+if(url.pathname==="/api/me"&&request.method==="GET"){try{const u=await session(request,env);return u?json({user:{id:u.user_id,username:u.username,email:u.email,status:u.status}}):json({error:"not_authenticated"},401)}catch{return json({error:"session_unavailable"},503)}}
+if(url.pathname==="/api/logout"&&request.method==="POST"){const t=getCookie(request);try{if(t)await env.TC.prepare("DELETE FROM sessions WHERE id_hash=?").bind(await hash(t)).run();return json({success:true},200,{"set-cookie":cookie("",0)})}catch{return json({error:"logout_failed"},503)}}
+if(url.pathname==="/api/accounts"&&request.method==="GET"){try{const u=await session(request,env);return u?json({user:{id:u.user_id,username:u.username,email:u.email,status:u.status},message:"Signed in to TC Accounts."}):json({error:"not_authenticated"},401)}catch{return json({error:"accounts_unavailable"},503)}}
+return json({error:"not_found"},404)}};
