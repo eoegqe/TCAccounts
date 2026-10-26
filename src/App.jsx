@@ -114,7 +114,11 @@ export default function App() {
       setUser(result.user || null);
       setPassword("");
       const returnTo = new URLSearchParams(window.location.search).get("return_to");
-      navigate(returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/accounts");
+      if (returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//") && !returnTo.includes("\\\\")) {
+        window.location.assign(returnTo);
+      } else {
+        window.location.assign("/accounts");
+      }
     } catch (error) {
       setMessage(error.message || "We couldn't complete that request.");
       setMessageType("error");
