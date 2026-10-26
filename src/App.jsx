@@ -213,25 +213,44 @@ export default function App() {
             </>
           ) : accountsPage && user ? (
             <>
-              <h2>Account dashboard</h2>
-              <p className="muted">Manage your TC identity, profile details, and account security.</p>
+              <div className="dashboard-welcome">
+                <span className="overline"><span className="live-dot" /> YOUR TC ACCOUNT</span>
+                <h2>Welcome back, {user.username}.</h2>
+                <p className="muted">Your account hub for Theegget Creations. Review your details, security, and connected applications from here.</p>
+              </div>
+              <div className="dashboard-actions feature-list">
+                <div>
+                  <span className="feature-number">01</span>
+                  <span><b>Profile</b><small>Review your username, email address, and account ID.</small></span>
+                  <button type="button" className="text-button" onClick={() => setAccountSection("profile")}>Open →</button>
+                </div>
+                <div>
+                  <span className="feature-number">02</span>
+                  <span><b>Security</b><small>Review your sign-in status and account access.</small></span>
+                  <button type="button" className="text-button" onClick={() => setAccountSection("security")}>Open →</button>
+                </div>
+                <div>
+                  <span className="feature-number">03</span>
+                  <span><b>Authorizations</b><small>Register or revoke applications connected to your TC Account.</small></span>
+                  <a className="text-button" href="/auth">Open →</a>
+                </div>
+              </div>
+              <h3>Account summary</h3>
+              <div className="profile">
+                <div><span>Username</span><strong>{user.username}</strong></div>
+                <div><span>Status</span><strong>{user.status || "Active"}</strong></div>
+                <div><span>Email</span><strong>{user.email || "Not provided"}</strong></div>
+                <div><span>TC user ID</span><strong>{user.id}</strong></div>
+              </div>
+              <h3>Manage your account</h3>
               <nav className="tabs account-nav" aria-label="Account management">
                 <button type="button" className={accountSection === "overview" ? "selected" : ""} aria-pressed={accountSection === "overview"} onClick={() => setAccountSection("overview")}>Overview</button>
                 <button type="button" className={accountSection === "profile" ? "selected" : ""} aria-pressed={accountSection === "profile"} onClick={() => setAccountSection("profile")}>Profile</button>
-                
                 <button type="button" className={accountSection === "security" ? "selected" : ""} aria-pressed={accountSection === "security"} onClick={() => setAccountSection("security")}>Security</button>
               </nav>
               {accountSection === "overview" && (
                 <>
-                  <h3>Account overview</h3>
-                  <div className="profile">
-                    <div><span>Username</span><strong>{user.username}</strong></div>
-                    <div><span>Account status</span><strong>{user.status || "Active"}</strong></div>
-                    <div><span>Email</span><strong>{user.email || "Not provided"}</strong></div>
-                    <div><span>TC user ID</span><strong>{user.id}</strong></div>
-                  </div>
-                  <h3>Account access</h3>
-                  <p className="muted">Use your TC Account with participating Theegget Creations services. Manage registered applications and revoke access from Authorizations.</p>
+                  <p className="muted">This is your personal TC Account dashboard. Use the options above to review your account or manage applications that have been registered by you.</p>
                   <button className="button secondary" disabled={busy} onClick={logout}>{busy ? "Signing out…" : "Sign out of TC Accounts"}</button>
                 </>
               )}
@@ -244,7 +263,7 @@ export default function App() {
                     <div><span>TC user ID</span><strong>{user.id}</strong></div>
                     <div><span>Account status</span><strong>{user.status || "Active"}</strong></div>
                   </div>
-                  <p className="muted">Profile editing is not available through the current account API, so these details are read-only.</p>
+                  <p className="muted">These details are currently read-only because the account API does not yet provide profile-editing actions.</p>
                 </>
               )}
               {accountSection === "security" && (
@@ -254,8 +273,7 @@ export default function App() {
                     <div><span>Signed-in account</span><strong>{user.username}</strong></div>
                     <div><span>Session</span><strong>Currently signed in</strong></div>
                   </div>
-                  <p className="muted">For safety, sign out when using a shared device. You can manage registered OAuth applications on the Authorizations page.</p>
-                  <p className="muted">Password changes, password recovery, and a list of active sessions are not currently exposed by the TC Accounts API.</p>
+                  <p className="muted">Password changes, password recovery, and active-session management are not yet available through the account API.</p>
                   <button className="button secondary" disabled={busy} onClick={logout}>{busy ? "Signing out…" : "Sign out"}</button>
                 </>
               )}
