@@ -76,7 +76,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!user || path !== "/accounts") return;
+    if (!user || path !== "/auth") return;
     let active = true;
     request("/oauth/clients").then(result => { if (active) setOauthClients(result.clients || []); }).catch(error => { if (active) { setOauthClients([]); setMessage(error.message || "OAuth applications could not be loaded."); setMessageType("error"); } });
     return () => { active = false; };
@@ -110,6 +110,7 @@ export default function App() {
   }
 
   const accountsPage = path === "/accounts" || path.startsWith("/accounts/");
+  const authPage = path === "/auth" || path.startsWith("/auth/");
 
   function navigate(nextPath) {
     window.history.pushState({}, "", nextPath);
