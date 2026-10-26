@@ -183,15 +183,42 @@ export default function App() {
         </section>
 
         <section className="panel">
-          <div className="panel-heading"><span>TC ACCOUNT</span><span className="panel-status">{accountsPage && user ? "SIGNED IN" : "ACCOUNT ACCESS"}</span></div>
-          {accountsPage && user ? (
+          <div className="panel-heading"><span>{authPage ? "TC AUTHORIZATIONS" : "TC ACCOUNT"}</span><span className="panel-status">{(accountsPage || authPage) && user ? "SIGNED IN" : "ACCOUNT ACCESS"}</span></div>
+          {authPage && user ? (
+            <>
+              <h2>Authorizations</h2>
+              <p className="muted">Manage OAuth applications registered to your TC Account. Review redirect URLs and revoke applications you no longer trust.</p>
+              <a className="button secondary" href="/accounts">Account management <span>↗</span></a>
+              <h3>Register an application</h3>
+              <form onSubmit={createOAuthClient}>
+                <TextField label="Application name" value={clientName} onChange={event => setClientName(event.target.value)} placeholder="Eggser Control Center" minLength={2} maxLength={80} />
+                <label className="field"><span>Redirect URLs (one per line)</span><textarea required rows={3} value={redirectUris} onChange={event => setRedirectUris(event.target.value)} placeholder="https://your-app.example/oauth/callback" /></label>
+                <button className="button" type="submit" disabled={clientBusy}>{clientBusy ? "Registering…" : "Register application"} <span>→</span></button>
+              </form>
+              <h3>Your registered applications</h3>
+              <div className="oauth-client-list">
+                {oauthClients.length === 0 ? <p className="muted">No registered OAuth applications yet.</p> : oauthClients.map(client => <div className="oauth-client" key={client.client_id}>
+                  <strong>{client.name}</strong><small>Client ID</small><code>{client.client_id}</code><small>Redirect URLs</small>
+                  {(client.redirect_uris || []).map(uri => <code key={uri}>{uri}</code>)}
+                  <small>Scopes: {(client.scopes || []).join(", ")}</small>
+                  <button type="button" className="text-button danger" onClick={() => deleteOAuthClient(client.client_id)}>Revoke and delete application</button>
+                </div>)}
+              </div>
+              {message && <p className={`message ${messageType}`} role="status">{message}</p>}
+            </>
+          ) : (accountsPage || authPage) && !user ? (
+            <>
+              <h2>Sign in required</h2><p className="muted">Sign in to manage your TC Account and authorizations.</p>
+              <button className="button" onClick={() => navigate("/")}>Go to sign in <span>→</span></button>
+            </>
+          ) : accountsPage && user ? (
             <>
               <h2>Account dashboard</h2>
-              <p className="muted">Manage your TC identity, connected applications, and account access.</p>
+              <p className="muted">Manage your TC identity, profile details, and account security.</p>
               <nav className="tabs account-nav" aria-label="Account management">
                 <button type="button" className={accountSection === "overview" ? "selected" : ""} aria-pressed={accountSection === "overview"} onClick={() => setAccountSection("overview")}>Overview</button>
                 <button type="button" className={accountSection === "profile" ? "selected" : ""} aria-pressed={accountSection === "profile"} onClick={() => setAccountSection("profile")}>Profile</button>
-                <button type="button" className={accountSection === "applications" ? "selected" : ""} aria-pressed={accountSection === "applications"} onClick={() => setAccountSection("applications")}>Applications</button>
+                
                 <button type="button" className={accountSection === "security" ? "selected" : ""} aria-pressed={accountSection === "security"} onClick={() => setAccountSection("security")}>Security</button>
               </nav>
               {accountSection === "overview" && (
@@ -204,7 +231,7 @@ export default function App() {
                     <div><span>TC user ID</span><strong>{user.id}</strong></div>
                   </div>
                   <h3>Account access</h3>
-                  <p className="muted">Use your TC Account with participating Theegget Creations services. Review registered applications and revoke access you no longer need in Applications.</p>
+                  <p className="muted">Use your TC Account with participating Theegget Creations services. Manage registered applications and revoke access from Authorizations.</p>
                   <button className="button secondary" disabled={busy} onClick={logout}>{busy ? "Signing out…" : "Sign out of TC Accounts"}</button>
                 </>
               )}
@@ -220,28 +247,6 @@ export default function App() {
                   <p className="muted">Profile editing is not available through the current account API, so these details are read-only.</p>
                 </>
               )}
-              {accountSection === "applications" && (
-                <>
-                  <h3>Registered applications</h3>
-                  <p className="muted">Applications registered here can use TC Accounts sign-in. Check redirect URLs carefully and revoke apps you no longer trust.</p>
-                  <form onSubmit={createOAuthClient}>
-                    <TextField label="Application name" value={clientName} onChange={event => setClientName(event.target.value)} placeholder="Eggser Control Center" minLength={2} maxLength={80} />
-                    <label className="field"><span>Redirect URLs (one per line)</span><textarea required rows={3} value={redirectUris} onChange={event => setRedirectUris(event.target.value)} placeholder="https://your-app.example/oauth/callback" /></label>
-                    <button className="button" type="submit" disabled={clientBusy}>{clientBusy ? "Registering…" : "Register application"} <span>→</span></button>
-                  </form>
-                  <div className="oauth-client-list">
-                    {oauthClients.length === 0 ? <p className="muted">No registered OAuth applications yet.</p> : oauthClients.map(client => <div className="oauth-client" key={client.client_id}>
-                      <strong>{client.name}</strong>
-                      <small>Client ID</small>
-                      <code>{client.client_id}</code>
-                      <small>Redirect URLs</small>
-                      {(client.redirect_uris || []).map(uri => <code key={uri}>{uri}</code>)}
-                      <small>Scopes: {(client.scopes || []).join(", ")}</small>
-                      <button type="button" className="text-button danger" onClick={() => deleteOAuthClient(client.client_id)}>Revoke and delete application</button>
-                    </div>)}
-                  </div>
-                </>
-              )}
               {accountSection === "security" && (
                 <>
                   <h3>Security and access</h3>
@@ -249,7 +254,7 @@ export default function App() {
                     <div><span>Signed-in account</span><strong>{user.username}</strong></div>
                     <div><span>Session</span><strong>Currently signed in</strong></div>
                   </div>
-                  <p className="muted">For safety, sign out when using a shared device. You can manage registered OAuth applications in the Applications section.</p>
+                  <p className="muted">For safety, sign out when using a shared device. You can manage registered OAuth applications on the Authorizations page.</p>
                   <p className="muted">Password changes, password recovery, and a list of active sessions are not currently exposed by the TC Accounts API.</p>
                   <button className="button secondary" disabled={busy} onClick={logout}>{busy ? "Signing out…" : "Sign out"}</button>
                 </>
