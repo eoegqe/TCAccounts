@@ -2,6 +2,16 @@ import { useEffect, useState } from "react";
 
 const API = "/api";
 
+function safeReturnTo(value) {
+  if (!value) return null;
+  if (value.startsWith("/") && !value.startsWith("//") && !value.includes("\\\\")) return value;
+  try {
+    const target = new URL(value);
+    if (target.protocol === "https:" && target.origin === "https://panel-eggser.theegget.com") return target.toString();
+  } catch {}
+  return null;
+}
+
 async function request(path, options = {}) {
   const response = await fetch(API + path, {
     ...options,
@@ -46,7 +56,11 @@ export default function App() {
   useEffect(() => {
     let active = true;
     request("/me").then(result => {
-      if (active) setUser(result.user || null);
+      if (!active) return;
+      const signedInUser = result.user || null;
+      setUser(signedInUser);
+      const returnTo = safeReturnTo(new URLSearchParams(window.location.search).get("return_to"));
+      if (signedInUser && returnTo) window.location.replace(returnTo);
     }).catch(() => {
       if (active) setUser(null);
     }).finally(() => {
@@ -113,12 +127,8 @@ export default function App() {
         : await request("/login", { method: "POST", body: JSON.stringify({ identifier: identifier.trim(), password }) });
       setUser(result.user || null);
       setPassword("");
-      const returnTo = new URLSearchParams(window.location.search).get("return_to");
-      if (returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//") && !returnTo.includes("\\\\")) {
-        window.location.assign(returnTo);
-      } else {
-        window.location.assign("/accounts");
-      }
+      const returnTo = safeReturnTo(new URLSearchParams(window.location.search).get("return_to"));
+      window.location.assign(returnTo || "/accounts");
     } catch (error) {
       setMessage(error.message || "We couldn't complete that request.");
       setMessageType("error");
