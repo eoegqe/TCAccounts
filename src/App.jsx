@@ -7,9 +7,14 @@ function safeReturnTo(value) {
   if (value.startsWith("/") && !value.startsWith("//") && !value.includes("\\\\")) return value;
   try {
     const target = new URL(value);
-    if (target.protocol === "https:" && target.origin === "https://panel-eggser.theegget.com") return target.toString();
+    if (target.protocol === "https:" && ["https://panel-eggser.theegget.com", "https://panel.eggser.theegget.com"].includes(target.origin)) return target.toString();
   } catch {}
   return null;
+}
+
+function getReturnTo() {
+  const params = new URLSearchParams(window.location.search);
+  return safeReturnTo(params.get("return_to") || params.get("redirect_uri"));
 }
 
 async function request(path, options = {}) {
@@ -59,7 +64,7 @@ export default function App() {
       if (!active) return;
       const signedInUser = result.user || null;
       setUser(signedInUser);
-      const returnTo = safeReturnTo(new URLSearchParams(window.location.search).get("return_to"));
+      const returnTo = getReturnTo();
       if (signedInUser && returnTo) window.location.replace(returnTo);
     }).catch(() => {
       if (active) setUser(null);
@@ -127,7 +132,7 @@ export default function App() {
         : await request("/login", { method: "POST", body: JSON.stringify({ identifier: identifier.trim(), password }) });
       setUser(result.user || null);
       setPassword("");
-      const returnTo = safeReturnTo(new URLSearchParams(window.location.search).get("return_to"));
+      const returnTo = getReturnTo();
       window.location.assign(returnTo || "/accounts");
     } catch (error) {
       setMessage(error.message || "We couldn't complete that request.");
