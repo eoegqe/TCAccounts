@@ -48,7 +48,7 @@ if(!client)return json({error:"invalid_client"},400);
 let redirects,allowed;try{redirects=JSON.parse(client.redirect_uris_json);allowed=JSON.parse(client.scopes_json)}catch{return json({error:"invalid_client"},400)}
 if(!redirects.includes(redirectUri))return json({error:"invalid_redirect_uri"},400);
 if(scope.some(s=>!allowed.includes(s))||scope.some(s=>!["profile","email"].includes(s)))return json({error:"invalid_scope"},400);
-const u=await session(request,env);if(!u){const login=new URL("/",url.origin);login.searchParams.set("return_to",url.pathname+url.search);return Response.redirect(login.toString(),302)}
+const u=await session(request,env);if(!u){const login=new URL("/login",url.origin);login.searchParams.set("return_to",url.pathname+url.search);return Response.redirect(login.toString(),302)}
 const esc=s=>String(s).replace(/[&<>"']/g,x=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[x]));
 const fields={client_id:clientId,redirect_uri:redirectUri,response_type:responseType,scope:scope.join(" "),state,code_challenge:challenge,code_challenge_method:method};
 const hidden=Object.entries(fields).map(([k,v])=>'<input type="hidden" name="'+k+'" value="'+esc(v)+'">').join("");
