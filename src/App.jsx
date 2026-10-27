@@ -5,10 +5,6 @@ const API = "/api";
 function safeReturnTo(value) {
   if (!value) return null;
   if (value.startsWith("/") && !value.startsWith("//") && !value.includes("\\")) return value;
-  try {
-    const target = new URL(value);
-    if (target.protocol === "https:" && ["https://panel-eggser.theegget.com", "https://panel.eggser.theegget.com"].includes(target.origin)) return target.toString();
-  } catch {}
   return null;
 }
 
@@ -58,11 +54,7 @@ export default function App() {
   useEffect(() => {
     let active = true;
     request("/me").then(result => {
-      if (!active) return;
-      const signedInUser = result.user || null;
-      setUser(signedInUser);
-      const returnTo = getReturnTo();
-      if (signedInUser && returnTo) window.location.replace(returnTo);
+      if (active) setUser(result.user || null);
     }).catch(() => {
       if (active) setUser(null);
     }).finally(() => {
