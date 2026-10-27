@@ -10,7 +10,26 @@ function safeReturnTo(value) {
 
 function getReturnTo() {
   const params = new URLSearchParams(window.location.search);
-  return safeReturnTo(params.get("return_to") || params.get("redirect_uri"));
+  const candidate = params.get("return_to") || params.get("redirect_uri");
+  const internal = safeReturnTo(candidate);
+  if (internal) return internal;
+
+  // When the user opens app registration from Eggser, keep them on that
+  // registration page after signing in instead of sending them to /accounts.
+  if (window.location.pathname === "/auth" && candidate) {
+    try {
+      const target = new URL(candidate);
+      if (
+        target.protocol === "https:" &&
+        !target.username &&
+        !target.password &&
+        ["panel-eggser.theegget.com", "panel.eggser.theegget.com"].includes(target.hostname)
+      ) {
+        return window.location.pathname + window.location.search;
+      }
+    } catch {}
+  }
+  return null;
 }
 
 function getRegistrationDefaults() {
@@ -221,7 +240,7 @@ export default function App() {
             </div>
             {feedback}
           </>
-        ) : (accountsPage || authPage) && !user ? (
+        ) : accountsPage && !user ? (
           <>
             <h1>Sign in required</h1>
             <p className="muted">Sign in to manage your Theegget Creations account.</p>
