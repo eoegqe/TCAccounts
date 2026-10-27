@@ -3,14 +3,20 @@ import { useEffect, useState } from "react";
 const API = "/api";
 
 function safeReturnTo(value) {
-  if (!value) return null;
-  if (value.startsWith("/") && !value.startsWith("//") && !value.includes("\\")) return value;
+  if (!value || value.includes("\\")) return null;
+  if (value.startsWith("/") && !value.startsWith("//")) return value;
+  try {
+    const target = new URL(value, window.location.origin);
+    if (target.origin === window.location.origin && !target.username && !target.password) {
+      return target.pathname + target.search + target.hash;
+    }
+  } catch {}
   return null;
 }
 
 function getReturnTo() {
   const params = new URLSearchParams(window.location.search);
-  const candidate = params.get("return_to") || params.get("redirect_uri");
+  const candidate = params.get("return_to") || params.get("redirect_url") || params.get("redirect_uri");
   const internal = safeReturnTo(candidate);
   if (internal) return internal;
 
