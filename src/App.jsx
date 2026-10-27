@@ -98,6 +98,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (loading || !user || path !== "/") return;
+    const returnTo = getReturnTo();
+    window.location.replace(returnTo || "/accounts");
+  }, [loading, user, path]);
+
+  useEffect(() => {
     if (!user || path !== "/auth") return;
     let active = true;
     request("/oauth/clients").then(result => {
