@@ -13,6 +13,21 @@ function getReturnTo() {
   return safeReturnTo(params.get("return_to") || params.get("redirect_uri"));
 }
 
+function getRegistrationDefaults() {
+  const params = new URLSearchParams(window.location.search);
+  const candidate = params.get("return_to") || params.get("redirect_uri");
+  if (!candidate) return { name: "", redirectUri: "" };
+  try {
+    const url = new URL(candidate);
+    if (url.protocol !== "https:" || url.username || url.password) return { name: "", redirectUri: "" };
+    const redirectUri = url.origin + (url.pathname || "/");
+    const name = url.hostname.includes("eggser") ? "Eggser Control Center" : url.hostname;
+    return { name, redirectUri };
+  } catch {
+    return { name: "", redirectUri: "" };
+  }
+}
+
 async function request(path, options = {}) {
   const response = await fetch(API + path, {
     ...options,
@@ -40,8 +55,8 @@ export default function App() {
   const [messageType, setMessageType] = useState("info");
   const [path, setPath] = useState(window.location.pathname);
   const [oauthClients, setOauthClients] = useState([]);
-  const [clientName, setClientName] = useState("");
-  const [redirectUris, setRedirectUris] = useState("");
+  const [clientName, setClientName] = useState(() => getRegistrationDefaults().name);
+  const [redirectUris, setRedirectUris] = useState(() => getRegistrationDefaults().redirectUri);
   const [clientBusy, setClientBusy] = useState(false);
   const [accountSection, setAccountSection] = useState("overview");
 
@@ -185,7 +200,7 @@ export default function App() {
         {authPage && user ? (
           <>
             <h1>Connected applications</h1>
-            <p className="muted">Manage apps that can request permission to use your TC identity.</p>
+            <p className="muted">Manage apps that can request permission to use your TC identity. When you open this page from an app link, its name and HTTPS redirect URL are filled in for you; review them and register the app below.</p>
             <a className="button secondary" href="/accounts">Back to account <span>↗</span></a>
             <h2 className="section-title">Register an application</h2>
             <form onSubmit={createOAuthClient}>
