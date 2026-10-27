@@ -15,3 +15,11 @@ database_id = "fd0e9d90-b443-4002-8378-f0d817fb415b"
 
 [vars]
 APP_ENV = "production"
+
+[previews.vars]
+APP_ENV = "preview"
+
+[[previews.d1_databases]]
+binding = "TC"
+database_name = "TC-preview"
+database_id = "f9754f63-67b9-4eb2-bb51-91d860aec9f1"
