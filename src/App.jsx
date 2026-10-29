@@ -50,6 +50,9 @@ function getReturnTo() {
   return null;
 }
 
+// Capture OAuth return targets immediately, before sign-in state changes or route transitions.
+if (typeof window !== "undefined") getReturnTo();
+
 function consumeReturnTo(target) {
   try { window.sessionStorage.removeItem(RETURN_TO_KEY); } catch {}
   return target;
