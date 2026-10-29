@@ -288,6 +288,7 @@ export default function App() {
               <div><span>Email</span><strong>{user.email || "Not provided"}</strong></div>
               <div><span>Status</span><strong>{user.status || "Active"}</strong></div>
               <div><span>Account ID</span><strong>{user.id}</strong></div>
+              <div><span>TCAdmin role</span><strong>{{0:"Banned",1:"User",2:"Support",3:"Admin",4:"Co-owner",5:"Owner"}[Number(user.role ?? 1)] || "User"}</strong></div>
             </div>
             <nav className="account-actions">
               <button className={accountSection === "overview" ? "selected" : ""} onClick={() => setAccountSection("overview")}>Overview</button>
