@@ -14,14 +14,26 @@ function safeReturnTo(value) {
   return null;
 }
 
+const RETURN_TO_KEY = "tcaccounts_pending_return_to";
+
 function getReturnTo() {
   const params = new URLSearchParams(window.location.search);
   const candidate = params.get("return_to") || params.get("redirect_url") || params.get("redirect_uri");
   const internal = safeReturnTo(candidate);
-  if (internal) return internal;
+  if (internal) {
+    try { window.sessionStorage.setItem(RETURN_TO_KEY, internal); } catch {}
+    return internal;
+  }
 
-  // When the user opens app registration from Eggser, keep them on that
-  // registration page after signing in instead of sending them to /accounts.
+  // Keep an OAuth authorization request intact if the login UI changes or
+  // the browser restores the sign-in page before the form is submitted.
+  try {
+    const pending = safeReturnTo(window.sessionStorage.getItem(RETURN_TO_KEY));
+    if (pending) return pending;
+    window.sessionStorage.removeItem(RETURN_TO_KEY);
+  } catch {}
+
+  // App-registration links may return to their own registration screen after sign-in.
   if (window.location.pathname === "/auth" && candidate) {
     try {
       const target = new URL(candidate);
@@ -36,6 +48,11 @@ function getReturnTo() {
     } catch {}
   }
   return null;
+}
+
+function consumeReturnTo(target) {
+  try { window.sessionStorage.removeItem(RETURN_TO_KEY); } catch {}
+  return target;
 }
 
 function getRegistrationDefaults() {
@@ -108,7 +125,7 @@ export default function App() {
 
   useEffect(() => {
     if (loading || !user || path !== "/" || mode === "reset") return;
-    const returnTo = getReturnTo();
+    const returnTo = consumeReturnTo(getReturnTo());
     window.location.replace(returnTo || "/accounts");
   }, [loading, user, path, mode]);
 
@@ -171,7 +188,7 @@ export default function App() {
         : await request("/login", { method: "POST", body: JSON.stringify({ identifier: identifier.trim(), password }) });
       setUser(result.user || null);
       setPassword("");
-      const returnTo = getReturnTo();
+      const returnTo = consumeReturnTo(getReturnTo());
       window.location.assign(returnTo || "/accounts");
     } catch (error) {
       setMessage(error.message || "We couldn't complete that request.");
