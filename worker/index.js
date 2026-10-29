@@ -1,3 +1,4 @@
+import { connect } from "cloudflare:sockets";
 const json=(data,status=200,headers={})=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff",...headers}});
 const enc=new TextEncoder(), COOKIE="tc_session", AGE=2592000;
 const b64=b=>{let s="";for(const x of b)s+=String.fromCharCode(x);return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"")};
@@ -12,9 +13,67 @@ const corsJson=(req,data,status=200,headers={})=>{const origin=req.headers.get("
 async function body(req){try{return await req.json()}catch{return null}}
 async function session(req,env){const t=getCookie(req);if(!t)return null;const h=await hash(t),now=new Date().toISOString();const u=await env.TC.prepare("SELECT s.id_hash,s.user_id,u.username,u.email,u.status FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id_hash=? AND s.expires_at>? AND u.status='active'").bind(h,now).first();if(u)await env.TC.prepare("UPDATE sessions SET last_seen_at=? WHERE id_hash=?").bind(now,h).run();return u}
 async function createSession(env,userId){const token=random(),now=new Date().toISOString(),expires=new Date(Date.now()+AGE*1000).toISOString();await env.TC.prepare("INSERT INTO sessions(id_hash,user_id,expires_at,created_at,last_seen_at) VALUES(?,?,?,?,?)").bind(await hash(token),userId,expires,now,now).run();return token}
+
+const base64Text=value=>{const bytes=enc.encode(value);let binary="";for(const byte of bytes)binary+=String.fromCharCode(byte);return btoa(binary)};
+async function sendResetEmail(env,to,token,requestUrl){
+if(!env.IONOS_SMTP_USER||!env.IONOS_SMTP_PASSWORD)throw new Error("IONOS SMTP secrets are missing");
+const host=env.IONOS_SMTP_HOST||"smtp.ionos.com",from=env.IONOS_SMTP_FROM||"notify@theegget.com",port=Number(env.IONOS_SMTP_PORT||465);
+const resetUrl=new URL("/",requestUrl);resetUrl.searchParams.set("reset_token",token);
+const plain="A password reset was requested for your TC Accounts identity.\r\n\r\nUse this one-time link within 30 minutes to choose a new password:\r\n"+resetUrl.toString()+"\r\n\r\nIf you did not request this, you can ignore this email.";
+const html="<div style=\"background:#080808;color:#f5f5f5;font-family:Arial,sans-serif;padding:32px\"><div style=\"max-width:520px;margin:auto;border:1px solid #292929;border-radius:16px;padding:28px;background:#111\"><p style=\"color:#aaa;font-size:12px\">THEEGGET CREATIONS · TC ACCOUNTS</p><h1 style=\"font-size:25px\">Reset your password</h1><p style=\"color:#bbb;line-height:1.6\">A password reset was requested for your TC Accounts identity. Use the link below within 30 minutes to choose a new password.</p><p><a href=\""+resetUrl.toString()+"\" style=\"display:inline-block;background:#fff;color:#111;padding:13px 18px;border-radius:8px;text-decoration:none;font-weight:bold\">Reset password</a></p><p style=\"color:#888;font-size:12px;line-height:1.6\">If you did not request this, you can ignore this email. The link can only be used once.</p><p style=\"color:#666;font-size:11px\">Theegget Creations</p></div></div>";
+const socket=connect({hostname:host,port},{secureTransport:"on",allowHalfOpen:false});
+const writer=socket.writable.getWriter(),reader=socket.readable.getReader(),decoder=new TextDecoder();
+let pending="",lines=[];
+const readReply=async()=>{const reply=[];while(true){const end=lines.findIndex(line=>/^\d{3} /.test(line));if(end>=0){reply.push(...lines.splice(0,end+1));return reply.join("\n")}const part=await reader.read();if(part.done)throw new Error("SMTP connection closed unexpectedly");pending+=decoder.decode(part.value,{stream:true});const split=pending.split("\r\n");pending=split.pop();lines.push(...split)}};
+const command=async(line,expected)=>{await writer.write(enc.encode(line+"\r\n"));const result=await readReply();if(!expected.includes(Number(result.slice(0,3))))throw new Error("SMTP command failed with response "+result.slice(0,3));return result};
+try{
+const greeting=await readReply();if(!greeting.startsWith("220"))throw new Error("SMTP greeting failed");
+await command("EHLO accounts.theegget.com",[250]);
+await command("AUTH LOGIN",[334]);
+await command(base64Text(env.IONOS_SMTP_USER),[334]);
+await command(base64Text(env.IONOS_SMTP_PASSWORD),[235]);
+await command("MAIL FROM:<"+from+">",[250]);
+await command("RCPT TO:<"+to+">",[250,251]);
+await command("DATA",[354]);
+const mime=["From: Theegget Creations <"+from+">","To: <"+to+">","Subject: Reset your TC Accounts password","MIME-Version: 1.0","Content-Type: multipart/alternative; boundary=\"tcaccounts-reset\"","","--tcaccounts-reset","Content-Type: text/plain; charset=UTF-8","Content-Transfer-Encoding: base64","",base64Text(plain),"--tcaccounts-reset","Content-Type: text/html; charset=UTF-8","Content-Transfer-Encoding: base64","",base64Text(html),"--tcaccounts-reset--",""].join("\r\n");
+await writer.write(enc.encode(mime+"\r\n.\r\n"));
+const accepted=await readReply();if(!accepted.startsWith("250"))throw new Error("SMTP message was not accepted");
+await command("QUIT",[221]);
+}finally{try{await writer.close()}catch{}try{await reader.cancel()}catch{}try{socket.close()}catch{}}
+};
 export default {async fetch(request,env){const url=new URL(request.url);if(!originOk(request,env))return json({error:"origin_not_allowed"},403);if(request.method==="OPTIONS"){const origin=request.headers.get("origin")||"";const allowed=["https://panel-eggser.theegget.com","https://panel.eggser.theegget.com"].includes(origin)?origin:(new URL(origin||url.origin).origin===url.origin?origin:"");return new Response(null,{status:204,headers:{"access-control-allow-origin":allowed,"access-control-allow-methods":"GET, POST, OPTIONS","access-control-allow-headers":"authorization, content-type","access-control-max-age":"86400","vary":"Origin"}});}
 if(url.pathname==="/api/health"&&request.method==="GET"){try{const r=await env.TC.prepare("SELECT 1 AS ok").first();return json({service:"TCAccounts API",status:r?.ok===1?"ok":"database_unavailable",environment:env.APP_ENV||"unknown"},r?.ok===1?200:503)}catch{return json({status:"database_unavailable"},503)}}
 if(url.pathname==="/api/register"&&request.method==="POST"){const b=await body(request),username=typeof b?.username==="string"?b.username.trim():"",email=typeof b?.email==="string"?b.email.trim().toLowerCase():"",password=typeof b?.password==="string"?b.password:"";if(username.length<3||username.length>32||!/^[a-zA-Z0-9_.-]+$/.test(username))return json({error:"invalid_username",message:"Use 3–32 letters, numbers, dots, underscores, or hyphens."},400);if(email.length>254||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return json({error:"invalid_email",message:"Enter a valid email address."},400);if(password.length<12||password.length>128)return json({error:"invalid_password",message:"Password must be at least 12 characters."},400);try{const now=new Date().toISOString(),existing=await env.TC.prepare("SELECT id FROM users WHERE username=? COLLATE NOCASE OR email=? COLLATE NOCASE LIMIT 1").bind(username,email).first();if(existing)return json({error:"account_exists",message:"That username or email is already in use."},409);const u=await env.TC.prepare("INSERT INTO users(id,username,email,password_hash,status,created_at,updated_at) VALUES((SELECT COALESCE(MAX(id),0)+1 FROM users),?,?,?,?,?,?) RETURNING id,username,email,status,created_at").bind(username,email,await passwordHash(password),"active",now,now).first();if(!u)throw new Error("user_insert_returned_no_row");const token=await createSession(env,u.id);return json({user:u},201,{"set-cookie":cookie(token,AGE)})}catch(e){const detail=String(e?.message||e||"unknown_error");console.error("TC Accounts registration failed:",detail);if(/unique|constraint failed: users\\.(username|email)/i.test(detail))return json({error:"account_exists",message:"That username or email is already in use."},409);return json({error:"registration_failed",message:"Account creation failed. Please try again or contact TC support."},500)}}
+
+if(url.pathname==="/api/password-reset/request"&&request.method==="POST"){
+const b=await body(request),email=typeof b?.email==="string"?b.email.trim().toLowerCase():"";
+if(email.length>254||!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email))return json({error:"invalid_email",message:"Enter the email address on your TC account."},400);
+try{
+const u=await env.TC.prepare("SELECT id,email FROM users WHERE email=? COLLATE NOCASE AND status='active' LIMIT 1").bind(email).first();
+if(u){
+const now=new Date().toISOString(),token=random(32),expires=new Date(Date.now()+30*60*1000).toISOString(),tokenHash=await hash(token);
+await env.TC.prepare("DELETE FROM password_reset_tokens WHERE user_id=?").bind(u.id).run();
+await env.TC.prepare("INSERT INTO password_reset_tokens(token_hash,user_id,expires_at,created_at) VALUES(?,?,?,?)").bind(tokenHash,u.id,expires,now).run();
+try{await sendResetEmail(env,u.email,token,url.origin)}catch(e){await env.TC.prepare("DELETE FROM password_reset_tokens WHERE token_hash=?").bind(tokenHash).run();console.error("TC Accounts reset email delivery failed:",String(e?.message||e));}
+}
+return json({success:true,message:"If an active TC account uses that email address, a password reset link will be sent shortly."});
+}catch(e){console.error("TC Accounts password reset request failed:",String(e?.message||e));return json({error:"password_reset_unavailable",message:"Password recovery is temporarily unavailable. Please try again later."},503)}
+}
+if(url.pathname==="/api/password-reset/confirm"&&request.method==="POST"){
+const b=await body(request),token=typeof b?.token==="string"?b.token:"",password=typeof b?.password==="string"?b.password:"";
+if(!token||token.length>128)return json({error:"invalid_reset_token",message:"This password reset link is invalid or expired."},400);
+if(password.length<12||password.length>128)return json({error:"invalid_password",message:"Password must be at least 12 characters."},400);
+try{
+const tokenHash=await hash(token),now=new Date().toISOString();
+const row=await env.TC.prepare("SELECT t.user_id FROM password_reset_tokens t JOIN users u ON u.id=t.user_id WHERE t.token_hash=? AND t.expires_at>? AND u.status='active' LIMIT 1").bind(tokenHash,now).first();
+if(!row)return json({error:"invalid_reset_token",message:"This password reset link is invalid or expired."},400);
+const updated=await env.TC.prepare("UPDATE users SET password_hash=?,updated_at=? WHERE id=? AND status='active'").bind(await passwordHash(password),now,row.user_id).run();
+if(!updated.meta?.changes)return json({error:"password_reset_failed",message:"The password could not be changed. Request a new reset link."},400);
+await env.TC.prepare("DELETE FROM password_reset_tokens WHERE user_id=?").bind(row.user_id).run();
+await env.TC.prepare("DELETE FROM sessions WHERE user_id=?").bind(row.user_id).run();
+return json({success:true,message:"Your password has been reset. Sign in with your new password."});
+}catch(e){console.error("TC Accounts password reset confirmation failed:",String(e?.message||e));return json({error:"password_reset_unavailable",message:"Password recovery is temporarily unavailable. Please try again later."},503)}
+}
 if(url.pathname==="/api/login"&&request.method==="POST"){const b=await body(request),id=typeof b?.identifier==="string"?b.identifier.trim():"",p=typeof b?.password==="string"?b.password:"";if(!id||!p)return json({error:"missing_credentials",message:"Enter your username/email and password."},400);try{const u=await env.TC.prepare("SELECT id,username,email,password_hash,status FROM users WHERE username=? COLLATE NOCASE OR email=? COLLATE NOCASE LIMIT 1").bind(id,id).first();if(!u||u.status!=="active"||!(await verify(p,u.password_hash)))return json({error:"invalid_credentials",message:"The username/email or password is incorrect."},401);const token=await createSession(env,u.id);return json({user:{id:u.id,username:u.username,email:u.email,status:u.status}},200,{"set-cookie":cookie(token,AGE)})}catch(e){console.error("TC Accounts login failed:",String(e?.message||e));return json({error:"login_unavailable",message:"Sign-in is unavailable. Please try again."},503)}}
 if(url.pathname==="/api/me"&&request.method==="GET"){try{const u=await session(request,env);return u?json({user:{id:u.user_id,username:u.username,email:u.email,status:u.status}}):json({error:"not_authenticated"},401)}catch(e){console.error("TC Accounts session lookup failed:",String(e?.message||e));return json({error:"session_unavailable"},503)}}
 if(url.pathname==="/api/logout"&&request.method==="POST"){const t=getCookie(request);try{if(t)await env.TC.prepare("DELETE FROM sessions WHERE id_hash=?").bind(await hash(t)).run();return json({success:true},200,{"set-cookie":cookie("",0)})}catch(e){console.error("TC Accounts logout failed:",String(e?.message||e));return json({error:"logout_failed"},503)}}
