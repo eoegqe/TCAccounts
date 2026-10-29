@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT NOT NULL COLLATE NOCASE UNIQUE,
   password_hash TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled', 'locked')),
+  role INTEGER NOT NULL DEFAULT 1 CHECK (role BETWEEN 0 AND 5),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
