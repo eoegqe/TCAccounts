@@ -244,7 +244,7 @@ export default function App() {
 
   return (
     <main className="auth-shell">
-      <section className="panel">
+      <section className={`panel ${accountsPage && user ? "dashboard-panel" : authPage && user ? "applications-panel" : "sign-in-panel"}`}>
         <div className="brand-lockup"><span className="tc-mark">TC</span><span className="brand-name">Theegget Creations</span></div>
         <div className="panel-heading"><span>{authPage ? "CONNECTED APPLICATIONS" : accountsPage ? "YOUR ACCOUNT" : "ACCOUNT ACCESS"}</span><span className="panel-status">{user ? "SIGNED IN" : "SECURE SIGN-IN"}</span></div>
 
