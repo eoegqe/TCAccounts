@@ -69,10 +69,11 @@ function TextField({ label, ...props }) {
 }
 
 export default function App() {
-  const [mode, setMode] = useState("login");
+  const [mode, setMode] = useState(() => new URLSearchParams(window.location.search).has("reset_token") ? "reset" : "login");
   const [identifier, setIdentifier] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [resetToken, setResetToken] = useState(() => new URLSearchParams(window.location.search).get("reset_token") || "");
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -137,6 +138,7 @@ export default function App() {
     setMode(nextMode);
     setPassword("");
     setMessage("");
+    if (nextMode !== "reset") setResetToken("");
   }
 
   async function submit(event) {
@@ -144,6 +146,24 @@ export default function App() {
     setBusy(true);
     setMessage("");
     try {
+      if (mode === "forgot") {
+        const result = await request("/password-reset/request", { method: "POST", body: JSON.stringify({ email: identifier.trim() }) });
+        setMessage(result.message || "If an active TC account uses that email address, a password reset link will be sent shortly.");
+        setMessageType("info");
+        return;
+      }
+      if (mode === "reset") {
+        const result = await request("/password-reset/confirm", { method: "POST", body: JSON.stringify({ token: resetToken, password }) });
+        setPassword("");
+        setResetToken("");
+        window.history.replaceState({}, "", "/");
+        setPath("/");
+        setMode("login");
+        setIdentifier("");
+        setMessage(result.message || "Your password has been reset. Sign in with your new password.");
+        setMessageType("info");
+        return;
+      }
       const result = mode === "register"
         ? await request("/register", { method: "POST", body: JSON.stringify({ username: identifier.trim(), email: email.trim(), password }) })
         : await request("/login", { method: "POST", body: JSON.stringify({ identifier: identifier.trim(), password }) });
@@ -281,18 +301,17 @@ export default function App() {
           </>
         ) : (
           <>
-            <h1>{mode === "register" ? "Create your account." : "Sign in."}</h1>
-            <p className="muted">{mode === "register" ? "Create your Theegget Creations account." : "Use your Theegget Creations account to continue."}</p>
+            <h1>{mode === "register" ? "Create your account." : mode === "forgot" ? "Reset your password." : mode === "reset" ? "Choose a new password." : "Sign in."}</h1>
+            <p className="muted">{mode === "register" ? "Create your Theegget Creations account." : mode === "forgot" ? "Enter the email address linked to your TC account. If it matches, we’ll send a one-time reset link." : mode === "reset" ? "Choose a new password for your Theegget Creations account." : "Use your Theegget Creations account to continue."}</p>
             <form onSubmit={submit}>
-              <TextField label={mode === "register" ? "Username" : "Username or email"} value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder={mode === "register" ? "Choose a username" : "Enter username or email"} autoComplete="username" minLength={mode === "register" ? 3 : undefined} />
+              {mode === "register" ? <TextField label="Username" value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="Choose a username" autoComplete="username" minLength={3} /> : mode === "login" ? <TextField label="Username or email" value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="Enter username or email" autoComplete="username" /> : mode === "forgot" ? <TextField label="Email address" type="email" value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="you@example.com" autoComplete="email" required /> : null}
               {mode === "register" && <TextField label="Email address" type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" />}
-              <TextField label="Password" type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder={mode === "register" ? "At least 12 characters" : "Enter your password"} autoComplete={mode === "register" ? "new-password" : "current-password"} minLength={mode === "register" ? 12 : undefined} />
-              {mode === "login" && <button type="button" className="text-button forgot" onClick={() => { setMessage("Password recovery isn't available yet. Contact support@theegget.com for help."); setMessageType("info"); }}>Forgot password?</button>}
-              <button className="button" type="submit" disabled={busy}>{busy ? "Please wait…" : mode === "register" ? "Create account" : "Sign in"} <span>→</span></button>
+              {(mode === "login" || mode === "register" || mode === "reset") && <TextField label={mode === "reset" ? "New password" : "Password"} type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder={mode === "register" || mode === "reset" ? "At least 12 characters" : "Enter your password"} autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={mode === "login" ? undefined : 12} required />}
+              <button className="button" type="submit" disabled={busy}>{busy ? "Please wait…" : mode === "register" ? "Create account" : mode === "forgot" ? "Send reset link" : mode === "reset" ? "Reset password" : "Sign in"} <span>→</span></button>
             </form>
             {feedback}
-            <p className="switch-copy">{mode === "register" ? "Already have an account?" : "New to Theegget Creations?"} <button type="button" onClick={() => changeMode(mode === "register" ? "login" : "register")}>{mode === "register" ? "Sign in instead" : "Create an account"}</button></p>
-            <p className="privacy-note">Your account is managed by Theegget Creations. External accounts cannot be used to sign in.</p>
+            <p className="switch-copy">{mode === "register" ? "Already have an account?" : mode === "forgot" || mode === "reset" ? "Remembered your password?" : "New to Theegget Creations?"} <button type="button" onClick={() => changeMode(mode === "register" || mode === "forgot" || mode === "reset" ? "login" : "register")}>{mode === "register" ? "Sign in instead" : mode === "forgot" || mode === "reset" ? "Back to sign in" : "Create an account"}</button></p>
+            {mode !== "forgot" && mode !== "reset" && <p className="privacy-note">Your account is managed by Theegget Creations. External accounts cannot be used to sign in.</p>}
           </>
         )}
         <footer className="auth-footer">© {new Date().getFullYear()} Theegget Creations</footer>
