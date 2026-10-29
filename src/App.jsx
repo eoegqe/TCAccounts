@@ -105,10 +105,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (loading || !user || path !== "/") return;
+    if (loading || !user || path !== "/" || mode === "reset") return;
     const returnTo = getReturnTo();
     window.location.replace(returnTo || "/accounts");
-  }, [loading, user, path]);
+  }, [loading, user, path, mode]);
 
   useEffect(() => {
     if (!user || path !== "/auth") return;
