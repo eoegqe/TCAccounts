@@ -47,8 +47,7 @@ if(!env.IONOS_SMTP_USER||!env.IONOS_SMTP_PASSWORD)throw new Error("IONOS SMTP se
 const host=env.IONOS_SMTP_HOST||"smtp.ionos.com",from=env.IONOS_SMTP_FROM||"notify@theegget.com",port=Number(env.IONOS_SMTP_PORT||465);
 const safe=value=>String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const html=safe(message).replace(/\r\n|\r|\n/g,"<br>");
-const b64=value=>{const bytes=enc.encode(value);let binary="";for(const byte of bytes)binary+=String.fromCharCode(byte);return btoa(binary).replace(/.{1,76}/g,"
-async function sendPasswordChangedEmail\r\n").trim()};
+const b64=value=>{const raw=base64Text(value);return raw.replace(/.{1,76}/g,line=>line+"\r\n").trim()};
 const socket=connect({hostname:host,port},{secureTransport:"on",allowHalfOpen:false});
 const writer=socket.writable.getWriter(),reader=socket.readable.getReader(),decoder=new TextDecoder();
 let pending="",lines=[];
@@ -56,10 +55,10 @@ const readReply=async()=>{while(true){const end=lines.findIndex(line=>/^\d{3} /.
 const command=async(line,expected)=>{await writer.write(enc.encode(line+"\r\n"));const result=await readReply();if(!expected.includes(Number(result.slice(0,3))))throw new Error("SMTP command failed with response "+result.slice(0,3));return result};
 try{
 const greeting=await readReply();if(!greeting.startsWith("220"))throw new Error("SMTP greeting failed");
-await command("EHLO accounts.theegget.com",[250]);await command("AUTH LOGIN",[334]);await command(btoa(env.IONOS_SMTP_USER),[334]);await command(btoa(env.IONOS_SMTP_PASSWORD),[235]);
-await command("MAIL FROM:<"+from+">",[250]);await command("RCPT TO:<"+user.email.replace(/[\r\n<>]/g,"")+">",[250,251]);await command("DATA",[354]);
+await command("EHLO accounts.theegget.com",[250]);await command("AUTH LOGIN",[334]);await command(base64Text(env.IONOS_SMTP_USER),[334]);await command(base64Text(env.IONOS_SMTP_PASSWORD),[235]);
+await command("MAIL FROM:<"+from+">",[250]);await command("RCPT TO:<"+String(user.email).replace(/[\r\n<>]/g,"")+">",[250,251]);await command("DATA",[354]);
 const boundary="tc-event-"+crypto.randomUUID(),encodedSubject="=?UTF-8?B?"+btoa(unescape(encodeURIComponent(subject)))+"?=";
-const mime=["From: Theegget Creations <"+from+">","To: <"+user.email+">","Subject: "+encodedSubject,"MIME-Version: 1.0",'Content-Type: multipart/alternative; boundary="'+boundary+'"',"","--"+boundary,"Content-Type: text/plain; charset=UTF-8","Content-Transfer-Encoding: base64","",b64(message),"--"+boundary,"Content-Type: text/html; charset=UTF-8","Content-Transfer-Encoding: base64","",b64('<div style="font-family:Arial,sans-serif;line-height:1.6;color:#202124">'+html+'</div>'),"--"+boundary+"--",""].join("\r\n");
+const mime=["From: Theegget Creations <"+from+">","To: <"+String(user.email).replace(/[\r\n<>]/g,"")+">","Subject: "+encodedSubject,"MIME-Version: 1.0",'Content-Type: multipart/alternative; boundary="'+boundary+'"',"","--"+boundary,"Content-Type: text/plain; charset=UTF-8","Content-Transfer-Encoding: base64","",b64(message),"--"+boundary,"Content-Type: text/html; charset=UTF-8","Content-Transfer-Encoding: base64","",b64('<div style="font-family:Arial,sans-serif;line-height:1.6;color:#202124">'+html+'</div>'),"--"+boundary+"--",""].join("\r\n");
 await writer.write(enc.encode(mime+"\r\n.\r\n"));const accepted=await readReply();if(!accepted.startsWith("250"))throw new Error("SMTP message was not accepted");try{await command("QUIT",[221])}catch{}
 }finally{try{await writer.close()}catch{}try{await reader.cancel()}catch{}try{socket.close()}catch{}}
 }
