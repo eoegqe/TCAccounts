@@ -109,11 +109,9 @@ Best, TC`
   },
   applicationAuthorized: {
     subject: "TC Security Notification",
-    render: ({ username, application }) => `Hello, ${username}
+    render: ({ username }) => `Hello, ${username}
 
 A new application has been authorized to access your TC account.
-
-Application: ${application}
 
 If you did not authorize this application, we recommend revoking its access to your TC account immediately.
 
