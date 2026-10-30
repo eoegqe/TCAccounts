@@ -44,9 +44,9 @@ await command("QUIT",[221]);
 async function sendPasswordChangedEmail(env,user){
 if(!env.IONOS_SMTP_USER||!env.IONOS_SMTP_PASSWORD)throw new Error("IONOS SMTP secrets are missing");
 const host=env.IONOS_SMTP_HOST||"smtp.ionos.com",from=env.IONOS_SMTP_FROM||"notify@theegget.com",port=Number(env.IONOS_SMTP_PORT||465);
-const plain="hello "+user.username+"\r\n\r\nYour password has been changed.\r\n\r\nIf this was not you, secure your account now: https://accounts.theegget.com\r\nIf you have lost access to your account, contact support (support@theegget.com).\r\n\r\nBest,\r\nTC";
+const plain="hello "+user.username+"\r\n\r\nYour password has been changed.\r\n\r\nIf this was not you, secure your account now: https://accounts.theegget.com\r\nIf you have lost access to your account, contact support (support@theegget.com).\r\n\r\nBest, TC";
 const safeName=String(user.username).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const html="<div style=\"font-family:Arial,sans-serif;line-height:1.6;color:#202124\"><p>hello "+safeName+"</p><p>Your password has been changed.</p><p>If this was not you, <a href=\"https://accounts.theegget.com\">secure your account now</a>.</p><p>If you have lost access to your account, contact support (<a href=\"mailto:support@theegget.com\">support@theegget.com</a>).</p><p>Best,<br>TC</p></div>";
+const html="<div style=\"font-family:Arial,sans-serif;line-height:1.6;color:#202124\"><p>hello "+safeName+"</p><p>Your password has been changed.</p><p>If this was not you, <a href=\"https://accounts.theegget.com\">secure your account now</a>.</p><p>If you have lost access to your account, contact support (<a href=\"mailto:support@theegget.com\">support@theegget.com</a>).</p><p>Best, TC</p></div>";
 const socket=connect({hostname:host,port},{secureTransport:"on",allowHalfOpen:false});
 const writer=socket.writable.getWriter(),reader=socket.readable.getReader(),decoder=new TextDecoder();
 let pending="",lines=[];
@@ -102,6 +102,23 @@ await env.TC.prepare("DELETE FROM sessions WHERE user_id=?").bind(row.user_id).r
 try{await sendPasswordChangedEmail(env,{username:row.username,email:row.email})}catch(e){console.error("TC Accounts password-change notification failed:",String(e?.message||e))}
 return json({success:true,message:"Your password has been reset. Sign in with your new password."});
 }catch(e){console.error("TC Accounts password reset confirmation failed:",String(e?.message||e));return json({error:"password_reset_unavailable",message:"Password recovery is temporarily unavailable. Please try again later."},503)}
+}
+if(url.pathname==="/api/password/change"&&request.method==="POST"){
+const u=await session(request,env);if(!u)return json({error:"not_authenticated",message:"Sign in again before changing your password."},401);
+const b=await body(request),currentPassword=typeof b?.currentPassword==="string"?b.currentPassword:"",newPassword=typeof b?.newPassword==="string"?b.newPassword:"";
+if(!currentPassword||!newPassword)return json({error:"missing_password",message:"Enter your current password and a new password."},400);
+if(newPassword.length<12||newPassword.length>128)return json({error:"invalid_password",message:"Your new password must be at least 12 characters."},400);
+if(currentPassword===newPassword)return json({error:"same_password",message:"Choose a password different from your current password."},400);
+try{
+const account=await env.TC.prepare("SELECT id,username,email,password_hash FROM users WHERE id=? AND status='active'").bind(u.user_id).first();
+if(!account||!(await verify(currentPassword,account.password_hash)))return json({error:"incorrect_password",message:"Your current password is incorrect."},401);
+const now=new Date().toISOString();
+const updated=await env.TC.prepare("UPDATE users SET password_hash=?,updated_at=? WHERE id=? AND status='active'").bind(await passwordHash(newPassword),now,u.user_id).run();
+if(!updated.meta?.changes)return json({error:"password_change_failed",message:"Your password could not be changed. Please try again."},400);
+await env.TC.prepare("DELETE FROM sessions WHERE user_id=? AND id_hash<>?").bind(u.user_id,u.id_hash).run();
+try{await sendPasswordChangedEmail(env,{username:account.username,email:account.email})}catch(e){console.error("TC Accounts password-change notification failed:",String(e?.message||e))}
+return json({success:true,message:"Your password has been changed. Other signed-in sessions have been signed out."});
+}catch(e){console.error("TC Accounts authenticated password change failed:",String(e?.message||e));return json({error:"password_change_unavailable",message:"Password change is temporarily unavailable. Please try again later."},503)}
 }
 if(url.pathname==="/api/login"&&request.method==="POST"){const b=await body(request),id=typeof b?.identifier==="string"?b.identifier.trim():"",p=typeof b?.password==="string"?b.password:"";if(!id||!p)return json({error:"missing_credentials",message:"Enter your username/email and password."},400);try{const u=await env.TC.prepare("SELECT id,username,email,password_hash,status FROM users WHERE username=? COLLATE NOCASE OR email=? COLLATE NOCASE LIMIT 1").bind(id,id).first();if(!u||u.status!=="active"||!(await verify(p,u.password_hash)))return json({error:"invalid_credentials",message:"The username/email or password is incorrect."},401);const token=await createSession(env,u.id);return json({user:{id:u.id,username:u.username,email:u.email,status:u.status}},200,{"set-cookie":cookie(token,AGE)})}catch(e){console.error("TC Accounts login failed:",String(e?.message||e));return json({error:"login_unavailable",message:"Sign-in is unavailable. Please try again."},503)}}
 if(url.pathname==="/api/me"&&request.method==="GET"){try{const u=await session(request,env);if(!u)return json({error:"not_authenticated"},401);const account=await env.TC.prepare("SELECT role FROM users WHERE id=?").bind(u.user_id).first();return json({user:{id:u.user_id,username:u.username,email:u.email,status:u.status,role:Number(account?.role??1)}})}catch(e){console.error("TC Accounts session lookup failed:",String(e?.message||e));return json({error:"session_unavailable"},503)}}
