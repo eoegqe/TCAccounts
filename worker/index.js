@@ -91,6 +91,40 @@ await command("QUIT",[221]);
 }finally{try{await writer.close()}catch{}try{await reader.cancel()}catch{}try{socket.close()}catch{}}
 }
 
+
+async function verifySupportMailbox(email,password,env){
+  const host=env.IONOS_IMAP_HOST||"imap.ionos.com";
+  const socket=connect({hostname:host,port:993},{secureTransport:"on",allowHalfOpen:false});
+  const reader=socket.readable.getReader(),writer=socket.writable.getWriter(),decoder=new TextDecoder();
+  let buffer="";
+  const readLine=async()=>{
+    while(true){
+      const index=buffer.indexOf("\r\n");
+      if(index>=0){const line=buffer.slice(0,index);buffer=buffer.slice(index+2);return line}
+      const part=await reader.read();
+      if(part.done)throw new Error("IMAP connection closed");
+      buffer+=decoder.decode(part.value,{stream:true});
+    }
+  };
+  const writeLine=async value=>writer.write(enc.encode(value+"\r\n"));
+  const quote=value=>'"'+value.replace(/\\/g,"\\\\").replace(/"/g,'\\"')+'"';
+  try{
+    const greeting=await readLine();
+    if(!greeting.startsWith("* OK"))throw new Error("IMAP service unavailable");
+    await writeLine("A001 LOGIN "+quote(email)+" "+quote(password));
+    let response="";
+    while(true){const line=await readLine();response+=line+"\n";if(line.startsWith("A001 "))break}
+    if(!/^A001 OK(?:\s|$)/i.test(response))return false;
+    await writeLine("A002 LOGOUT");
+    return true;
+  }finally{
+    try{await writer.close()}catch{}
+    try{reader.releaseLock()}catch{}
+    try{writer.releaseLock()}catch{}
+    try{socket.close()}catch{}
+  }
+}
+
 export default {async fetch(request,env){const url=new URL(request.url);if(request.method==="OPTIONS"){const origin=request.headers.get("origin")||"*";return new Response(null,{status:204,headers:{"access-control-allow-origin":origin,"access-control-allow-methods":"GET, POST, OPTIONS","access-control-allow-headers":"authorization, content-type","access-control-max-age":"86400","vary":"Origin"}});}
 if(url.pathname==="/api/health"&&request.method==="GET"){try{const r=await env.TC.prepare("SELECT 1 AS ok").first();return json({service:"TCAccounts API",status:r?.ok===1?"ok":"database_unavailable",environment:env.APP_ENV||"unknown"},r?.ok===1?200:503)}catch{return json({status:"database_unavailable"},503)}}
 if(url.pathname==="/api/register"&&request.method==="POST"){
@@ -256,4 +290,12 @@ const p=new URLSearchParams(await request.text()),clientId=p.get("client_id")||"
 if(!clientId||!redirectUri||!state||!challenge||method!=="S256")return json({error:"invalid_request"},400);
 const u=await session(request,env);if(!u){console.log("OAuth approval: session missing; redirecting to sign-in");const original=new URL("/oauth/authorize",url.origin);for(const key of ["client_id","redirect_uri","response_type","scope","state","code_challenge","code_challenge_method"]){const value=p.get(key);if(value!==null)original.searchParams.set(key,value)}const login=new URL("/login",url.origin);login.searchParams.set("return_to",original.pathname+original.search);console.log("OAuth approval requires a fresh login");return Response.redirect(login.toString(),303);}
 try{console.log("OAuth approval: session present; validating client and saving authorization code");const client=await env.TC.prepare("SELECT name,redirect_uris_json,scopes_json FROM oauth_clients WHERE client_id=?").bind(clientId).first();if(!client)return json({error:"invalid_client"},400);if(!JSON.parse(client.redirect_uris_json).includes(redirectUri)||scope.some(s=>!JSON.parse(client.scopes_json).includes(s)||!["profile","email"].includes(s)))return json({error:"invalid_request"},400);const code=random(32),now=new Date().toISOString(),expires=new Date(Date.now()+300000).toISOString();await env.TC.prepare("INSERT INTO oauth_codes(code_hash,client_id,user_id,redirect_uri,scope,code_challenge,code_challenge_method,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?)").bind(await hash(code),clientId,u.user_id,redirectUri,scope.join(" "),challenge,"S256",expires,now).run();try{const template=TC_NOTIFICATION_TEMPLATES.applicationAuthorized;await sendEventNotification(env,u,template.subject,template.render({username:u.username,application:client.name}))}catch(e){console.error("TC application-authorization notification failed:",String(e?.message||e))}const target=new URL(redirectUri);target.searchParams.set("code",code);target.searchParams.set("state",state);const destination=target.toString();const safeDestination=destination.replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");console.log("OAuth approval: authorization code saved; redirecting browser to "+target.origin+target.pathname);return new Response('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="0;url='+safeDestination+'"><title>Continuing sign-in…</title></head><body style="margin:0;background:#080808;color:#f5f5f5;font:15px system-ui;display:grid;min-height:100vh;place-items:center"><main style="padding:24px;text-align:center"><p>Approval complete. Returning to the application…</p><a style="color:#fff" href="'+safeDestination+'">Continue</a></main><script>window.location.replace('+JSON.stringify(destination)+')</script></body></html>',{status:200,headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store","referrer-policy":"no-referrer","content-security-policy":"default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; base-uri \'none\'; frame-ancestors \'none\'"}})}catch(e){console.error("OAuth approval failed:",String(e?.stack||e?.message||e));return new Response('<!doctype html><meta charset="utf-8"><title>Authorization failed</title><main style="font:15px system-ui;max-width:520px;margin:12vh auto;padding:24px;color:#eee;background:#111;border:1px solid #333;border-radius:14px"><h1>Authorization could not be completed</h1><p>TC Accounts could not save this approval. Return to the application and try again.</p><a style="color:#fff" href="/login">Sign in again</a></main>',{status:503,headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}})}}
+
+if(url.pathname==="/api/support/mailbox/login"&&request.method==="POST"){
+const b=await body(request),email=typeof b?.email==="string"?b.email.trim().toLowerCase():"",password=typeof b?.password==="string"?b.password:"";
+if(!/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@theegget\.com$/i.test(email))return corsJson(request,{error:"tc_email_required",message:"Use a valid @theegget.com mailbox address."},400);
+if(!password||password.length>1024)return corsJson(request,{error:"missing_credentials",message:"Enter your mailbox password."},400);
+try{const valid=await verifySupportMailbox(email,password,env);return valid?corsJson(request,{success:true,email,message:"Mailbox credentials verified."}):corsJson(request,{error:"invalid_credentials",message:"The TC mailbox address or password is incorrect."},401)}
+catch(e){console.error("Support mailbox authentication unavailable:",String(e?.message||e));return corsJson(request,{error:"mailbox_unavailable",message:"The mailbox service could not be reached. Try again later."},503)}
+}
 if(url.pathname.startsWith("/api/"))return json({error:"not_found"},404);return env.ASSETS.fetch(request)}};
