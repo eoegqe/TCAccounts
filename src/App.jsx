@@ -127,7 +127,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (loading || !user || path !== "/" || mode === "reset") return;
+    if (loading || !user || (path !== "/" && path !== "/login") || mode === "reset") return;
     const returnTo = consumeReturnTo(getReturnTo());
     window.location.replace(returnTo || "/accounts");
   }, [loading, user, path, mode]);
