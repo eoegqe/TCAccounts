@@ -92,38 +92,215 @@ await command("QUIT",[221]);
 }
 
 
-async function verifySupportMailbox(email,password,env){
-  const host=env.IONOS_IMAP_HOST||"imap.ionos.com";
-  const socket=connect({hostname:host,port:993},{secureTransport:"on",allowHalfOpen:false});
+
+function mailboxAddress(value){
+  const email=String(value||"").trim().toLowerCase();
+  return /^[a-z0-9.!#$%&'*+/=?^_\x60{|}~-]+@theegget\.com$/i.test(email)?email:"";
+}
+async function authorizeSupportMailbox(request,env){
+  const origin=request.headers.get("origin")||"";
+  if(origin!=="https://admin.theegget.com")return {error:json({error:"origin_not_allowed"},403)};
+  const token=(request.headers.get("authorization")||"").replace(/^Bearer\s+/i,"").trim();
+  if(!token)return {error:json({error:"not_authenticated"},401,{"access-control-allow-origin":origin,"vary":"Origin"})};
+  try{
+    const response=await fetch("https://accounts.theegget.com/oauth/userinfo",{headers:{Authorization:"Bearer "+token,Accept:"application/json"},cf:{cacheTtl:0}});
+    if(!response.ok)return {error:json({error:"not_authenticated"},401,{"access-control-allow-origin":origin,"vary":"Origin"})};
+    const identity=await response.json(),id=Number(identity.sub);
+    if(!Number.isSafeInteger(id)||id<1)return {error:json({error:"invalid_identity"},401,{"access-control-allow-origin":origin,"vary":"Origin"})};
+    const account=await env.TC.prepare("SELECT id,role,status FROM users WHERE id=?").bind(id).first();
+    if(!account||account.status!=="active"||Number(account.role)<2)return {error:json({error:"staff_only",message:"Support role or higher is required."},403,{"access-control-allow-origin":origin,"vary":"Origin"})};
+    return {account,origin};
+  }catch{return {error:json({error:"authorization_unavailable"},503,{"access-control-allow-origin":origin,"vary":"Origin"})}}
+}
+function supportJson(origin,data,status=200){
+  return json(data,status,{"access-control-allow-origin":origin,"access-control-allow-methods":"POST, OPTIONS","access-control-allow-headers":"authorization, content-type","vary":"Origin"});
+}
+function decodeHeader(value){
+  return String(value||"").replace(/=\?([^?]+)\?([bq])\?([^?]*)\?=/gi,(_,charset,encoding,encoded)=>{
+    try{
+      if(encoding.toLowerCase()==="b"){
+        const binary=atob(encoded);
+        const bytes=Uint8Array.from(binary,c=>c.charCodeAt(0));
+        return new TextDecoder(charset,{fatal:false}).decode(bytes);
+      }
+      return encoded.replace(/_/g," ").replace(/=([0-9a-f]{2})/gi,(_,hex)=>String.fromCharCode(parseInt(hex,16)));
+    }catch{return encoded}
+  });
+}
+function parseHeaders(raw){
+  const unfolded=String(raw||"").replace(/\r\n[ \t]+/g," ");
+  const result={};
+  for(const line of unfolded.split(/\r\n/)){
+    const index=line.indexOf(":");
+    if(index>0){const key=line.slice(0,index).trim().toLowerCase();result[key]=result[key]?result[key]+", "+line.slice(index+1).trim():line.slice(index+1).trim()}
+  }
+  return result;
+}
+function decodeQuotedPrintable(value){
+  return String(value||"").replace(/=\r\n/g,"").replace(/=([0-9a-f]{2})/gi,(_,hex)=>String.fromCharCode(parseInt(hex,16)));
+}
+function decodePartBody(value,encoding){
+  if(/^base64$/i.test(encoding||"")){
+    try{const clean=String(value||"").replace(/\s/g,"");const binary=atob(clean);return new TextDecoder().decode(Uint8Array.from(binary,c=>c.charCodeAt(0)))}catch{return ""}
+  }
+  if(/^quoted-printable$/i.test(encoding||""))return decodeQuotedPrintable(value);
+  return String(value||"");
+}
+function parseMail(raw){
+  const separator=raw.indexOf("\r\n\r\n");
+  const headers=parseHeaders(separator>=0?raw.slice(0,separator):raw);
+  const content=separator>=0?raw.slice(separator+4):"";
+  const subject=decodeHeader(headers.subject||"(no subject)");
+  const from=decodeHeader(headers.from||"");
+  const to=decodeHeader(headers.to||"");
+  const messageId=headers["message-id"]||"";
+  const contentType=headers["content-type"]||"text/plain";
+  let text="",html="",attachments=[];
+  const collect=(partRaw)=>{
+    const split=partRaw.indexOf("\r\n\r\n");
+    if(split<0)return;
+    const h=parseHeaders(partRaw.slice(0,split)),body=partRaw.slice(split+4);
+    const type=(h["content-type"]||"text/plain").toLowerCase();
+    const transfer=h["content-transfer-encoding"]||"";
+    const disposition=h["content-disposition"]||"";
+    const filenameMatch=type.match(/name="?([^";]+)"?/i)||disposition.match(/filename="?([^";]+)"?/i);
+    const boundaryMatch=type.match(/boundary="?([^";]+)"?/i);
+    if(type.startsWith("multipart/")&&boundaryMatch){
+      const boundary="--"+boundaryMatch[1];
+      for(const part of body.split(boundary).slice(1)){
+        if(part.startsWith("--"))continue;
+        collect(part.replace(/^\r\n/,"").replace(/\r\n$/,""));
+      }
+      return;
+    }
+    if(filenameMatch||/attachment/i.test(disposition)){
+      const filename=decodeHeader(filenameMatch?.[1]||"attachment");
+      const binary=body.replace(/\r\n$/,"");
+      attachments.push({filename,content_type:(h["content-type"]||"application/octet-stream").split(";")[0],size:/^base64$/i.test(transfer)?Math.floor(binary.replace(/\s/g,"").length*3/4):binary.length,content_base64:/^base64$/i.test(transfer)?binary.replace(/\s/g,""):btoa(binary)});
+      return;
+    }
+    if(type.startsWith("text/plain"))text+=decodePartBody(body,transfer);
+    else if(type.startsWith("text/html"))html+=decodePartBody(body,transfer);
+  };
+  collect("Content-Type: "+contentType+"\r\n"+(headers["content-transfer-encoding"]?"Content-Transfer-Encoding: "+headers["content-transfer-encoding"]+"\r\n":"")+"\r\n"+content);
+  const cleanText=text.replace(/\r\n/g,"\n").replace(/\0/g,"").slice(0,100000);
+  const plain=cleanText||html.replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/gi,"").replace(/<[^>]+>/g," ").replace(/&nbsp;/gi," ").replace(/&amp;/gi,"&").replace(/&lt;/gi,"<").replace(/&gt;/gi,">").replace(/\s+/g," ").slice(0,100000);
+  return {subject,from,to,date:headers.date||"",message_id:messageId,in_reply_to:headers["in-reply-to"]||"",body:plain,attachments};
+}
+async function openImap(email,password,env){
+  const socket=connect({hostname:env.IONOS_IMAP_HOST||"imap.ionos.com",port:Number(env.IONOS_IMAP_PORT||993)},{secureTransport:"on",allowHalfOpen:false});
   const reader=socket.readable.getReader(),writer=socket.writable.getWriter(),decoder=new TextDecoder();
-  let buffer="";
+  let buffer=new Uint8Array(0),tagNumber=0;
+  const append=part=>{const next=new Uint8Array(buffer.length+part.length);next.set(buffer);next.set(part,buffer.length);buffer=next};
+  const readChunk=async()=>{const part=await reader.read();if(part.done)throw new Error("IMAP connection closed");append(part.value)};
   const readLine=async()=>{
     while(true){
-      const index=buffer.indexOf("\r\n");
-      if(index>=0){const line=buffer.slice(0,index);buffer=buffer.slice(index+2);return line}
-      const part=await reader.read();
-      if(part.done)throw new Error("IMAP connection closed");
-      buffer+=decoder.decode(part.value,{stream:true});
+      for(let i=0;i<buffer.length-1;i++)if(buffer[i]===13&&buffer[i+1]===10){
+        const line=decoder.decode(buffer.slice(0,i));buffer=buffer.slice(i+2);return line;
+      }
+      await readChunk();
     }
   };
-  const writeLine=async value=>writer.write(enc.encode(value+"\r\n"));
-  const quote=value=>'"'+value.replace(/\\/g,"\\\\").replace(/"/g,'\\"')+'"';
+  const readBytes=async count=>{
+    while(buffer.length<count)await readChunk();
+    const result=buffer.slice(0,count);buffer=buffer.slice(count);return result;
+  };
+  const command=async value=>{
+    const tag="A"+String(++tagNumber).padStart(3,"0");
+    await writer.write(enc.encode(tag+" "+value+"\r\n"));
+    const items=[];
+    while(true){
+      const line=await readLine();items.push({line});
+      const literal=line.match(/\{(\d+)\+?\}$/);
+      if(literal){const length=Number(literal[1]);if(!Number.isSafeInteger(length)||length>8*1024*1024)throw new Error("Message exceeds the 8 MB mailbox limit.");const bytes=await readBytes(length);items.push({literal:decoder.decode(bytes)});}
+      if(line.startsWith(tag+" "))return {tag,line,items,ok:new RegExp("^"+tag+" OK(?:\\s|$)","i").test(line)};
+    }
+  };
   try{
     const greeting=await readLine();
     if(!greeting.startsWith("* OK"))throw new Error("IMAP service unavailable");
-    await writeLine("A001 LOGIN "+quote(email)+" "+quote(password));
-    let response="";
-    while(true){const line=await readLine();response+=line+"\n";if(line.startsWith("A001 "))break}
-    if(!/^A001 OK(?:\s|$)/i.test(response))return false;
-    await writeLine("A002 LOGOUT");
-    return true;
-  }finally{
-    try{await writer.close()}catch{}
-    try{reader.releaseLock()}catch{}
-    try{writer.releaseLock()}catch{}
-    try{socket.close()}catch{}
-  }
+    const login=await command("LOGIN "+JSON.stringify(email)+" "+JSON.stringify(password));
+    if(!login.ok)throw new Error("The TC mailbox address or password is incorrect.");
+    return {
+      command,
+      close:async()=>{try{await command("LOGOUT")}catch{}try{await writer.close()}catch{}try{await reader.cancel()}catch{}try{socket.close()}catch{}}
+    };
+  }catch(e){try{await writer.close()}catch{}try{await reader.cancel()}catch{}try{socket.close()}catch{}throw e}
 }
+async function mailboxInbox(email,password,env){
+  const imap=await openImap(email,password,env);
+  try{
+    const selected=await imap.command("SELECT INBOX");
+    if(!selected.ok)throw new Error("Could not open the INBOX folder.");
+    const search=await imap.command("UID SEARCH ALL");
+    const searchLine=search.items.find(item=>item.line?.startsWith("* SEARCH"));
+    const uids=(searchLine?.line||"").replace("* SEARCH","").trim().split(/\s+/).filter(Boolean).map(Number).filter(Number.isSafeInteger);
+    const latest=uids.slice(-50).reverse();
+    if(!latest.length)return {messages:[],total:0};
+    const fetched=await imap.command("UID FETCH "+latest.join(",")+" (UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])");
+    const messages=[];
+    for(let i=0;i<fetched.items.length;i++){
+      const item=fetched.items[i];
+      if(!item.line?.includes("FETCH"))continue;
+      const header=fetched.items[i+1]?.literal;
+      if(typeof header!=="string")continue;
+      const h=parseHeaders(header);
+      const uid=Number((item.line.match(/\bUID\s+(\d+)/i)||[])[1]);
+      if(!uid)continue;
+      messages.push({uid,from:decodeHeader(h.from||""),to:decodeHeader(h.to||""),subject:decodeHeader(h.subject||"(no subject)"),date:h.date||"",message_id:h["message-id"]||"",unread:!/\bFLAGS\s+\([^)]*\\Seen/i.test(item.line)});
+    }
+    messages.sort((a,b)=>b.uid-a.uid);\n    return {messages,total:uids.length};
+  }finally{await imap.close()}
+}
+async function mailboxMessage(email,password,uid,env){
+  const imap=await openImap(email,password,env);
+  try{
+    const selected=await imap.command("SELECT INBOX");if(!selected.ok)throw new Error("Could not open the INBOX folder.");
+    const fetched=await imap.command("UID FETCH "+uid+" (UID BODY[])");
+    const literal=fetched.items.find(item=>typeof item.literal==="string")?.literal;
+    if(!fetched.ok||!literal)throw new Error("That support message could not be loaded.");
+    return {uid,...parseMail(literal)};
+  }finally{await imap.close()}
+}
+async function sendMailboxReply(email,password,recipient,subject,body,original,env){
+  if(!env.IONOS_SMTP_HOST&&!env.IONOS_SMTP_PORT){} 
+  const host=env.IONOS_SMTP_HOST||"smtp.ionos.com",port=Number(env.IONOS_SMTP_PORT||465);
+  const socket=connect({hostname:host,port},{secureTransport:"on",allowHalfOpen:false});
+  const writer=socket.writable.getWriter(),reader=socket.readable.getReader(),decoder=new TextDecoder();
+  let pending="",lines=[];
+  const readReply=async()=>{
+    while(true){
+      const end=lines.findIndex(line=>/^\d{3} /.test(line));
+      if(end>=0)return lines.splice(0,end+1).join("\n");
+      const part=await reader.read();if(part.done)throw new Error("SMTP connection closed");
+      pending+=decoder.decode(part.value,{stream:true});const split=pending.split("\r\n");pending=split.pop();lines.push(...split);
+    }
+  };
+  const command=async(line,expected)=>{
+    await writer.write(enc.encode(line+"\r\n"));const response=await readReply();
+    if(!expected.includes(Number(response.slice(0,3))))throw new Error("SMTP rejected the reply (code "+response.slice(0,3)+").");
+    return response;
+  };
+  const safeAddress=value=>String(value||"").replace(/[\r\n<>]/g,"");
+  try{
+    const greeting=await readReply();if(!greeting.startsWith("220"))throw new Error("SMTP service unavailable");
+    await command("EHLO admin.theegget.com",[250]);
+    await command("AUTH LOGIN",[334]);
+    const b64=value=>btoa(unescape(encodeURIComponent(value)));
+    await command(b64(email),[334]);await command(b64(password),[235]);
+    await command("MAIL FROM:<"+email+">",[250]);
+    await command("RCPT TO:<"+safeAddress(recipient)+">",[250,251]);
+    await command("DATA",[354]);
+    const encodedSubject="=?UTF-8?B?"+btoa(unescape(encodeURIComponent(subject)))+"?=";
+    const plain=String(body).replace(/\r\n/g,"\n").replace(/\r/g,"\n").replace(/\0/g,"");
+    const refs=[original.message_id,original.in_reply_to].filter(Boolean).join(" ");
+    const linesOut=["From: <"+email+">","To: <"+safeAddress(recipient)+">","Subject: "+encodedSubject,"In-Reply-To: "+String(original.message_id||"").replace(/[\r\n]/g,""),"References: "+refs.replace(/[\r\n]/g,""),"MIME-Version: 1.0","Content-Type: text/plain; charset=UTF-8","Content-Transfer-Encoding: base64","",btoa(unescape(encodeURIComponent(plain))).replace(/.{1,76}/g,"$&\r\n"),""].join("\r\n");
+    await writer.write(enc.encode(linesOut.replace(/^\./gm,"..")+"\r\n.\r\n"));
+    const accepted=await readReply();if(!accepted.startsWith("250"))throw new Error("SMTP did not accept the reply.");
+    try{await command("QUIT",[221])}catch{}
+  }finally{try{await writer.close()}catch{}try{await reader.cancel()}catch{}try{socket.close()}catch{}}
+}
+
 
 export default {async fetch(request,env){const url=new URL(request.url);if(request.method==="OPTIONS"){const origin=request.headers.get("origin")||"*";return new Response(null,{status:204,headers:{"access-control-allow-origin":origin,"access-control-allow-methods":"GET, POST, OPTIONS","access-control-allow-headers":"authorization, content-type","access-control-max-age":"86400","vary":"Origin"}});}
 if(url.pathname==="/api/health"&&request.method==="GET"){try{const r=await env.TC.prepare("SELECT 1 AS ok").first();return json({service:"TCAccounts API",status:r?.ok===1?"ok":"database_unavailable",environment:env.APP_ENV||"unknown"},r?.ok===1?200:503)}catch{return json({status:"database_unavailable"},503)}}
@@ -291,11 +468,42 @@ if(!clientId||!redirectUri||!state||!challenge||method!=="S256")return json({err
 const u=await session(request,env);if(!u){console.log("OAuth approval: session missing; redirecting to sign-in");const original=new URL("/oauth/authorize",url.origin);for(const key of ["client_id","redirect_uri","response_type","scope","state","code_challenge","code_challenge_method"]){const value=p.get(key);if(value!==null)original.searchParams.set(key,value)}const login=new URL("/login",url.origin);login.searchParams.set("return_to",original.pathname+original.search);console.log("OAuth approval requires a fresh login");return Response.redirect(login.toString(),303);}
 try{console.log("OAuth approval: session present; validating client and saving authorization code");const client=await env.TC.prepare("SELECT name,redirect_uris_json,scopes_json FROM oauth_clients WHERE client_id=?").bind(clientId).first();if(!client)return json({error:"invalid_client"},400);if(!JSON.parse(client.redirect_uris_json).includes(redirectUri)||scope.some(s=>!JSON.parse(client.scopes_json).includes(s)||!["profile","email"].includes(s)))return json({error:"invalid_request"},400);const code=random(32),now=new Date().toISOString(),expires=new Date(Date.now()+300000).toISOString();await env.TC.prepare("INSERT INTO oauth_codes(code_hash,client_id,user_id,redirect_uri,scope,code_challenge,code_challenge_method,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?)").bind(await hash(code),clientId,u.user_id,redirectUri,scope.join(" "),challenge,"S256",expires,now).run();try{const template=TC_NOTIFICATION_TEMPLATES.applicationAuthorized;await sendEventNotification(env,u,template.subject,template.render({username:u.username,application:client.name}))}catch(e){console.error("TC application-authorization notification failed:",String(e?.message||e))}const target=new URL(redirectUri);target.searchParams.set("code",code);target.searchParams.set("state",state);const destination=target.toString();const safeDestination=destination.replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");console.log("OAuth approval: authorization code saved; redirecting browser to "+target.origin+target.pathname);return new Response('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="0;url='+safeDestination+'"><title>Continuing sign-in…</title></head><body style="margin:0;background:#080808;color:#f5f5f5;font:15px system-ui;display:grid;min-height:100vh;place-items:center"><main style="padding:24px;text-align:center"><p>Approval complete. Returning to the application…</p><a style="color:#fff" href="'+safeDestination+'">Continue</a></main><script>window.location.replace('+JSON.stringify(destination)+')</script></body></html>',{status:200,headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store","referrer-policy":"no-referrer","content-security-policy":"default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; base-uri \'none\'; frame-ancestors \'none\'"}})}catch(e){console.error("OAuth approval failed:",String(e?.stack||e?.message||e));return new Response('<!doctype html><meta charset="utf-8"><title>Authorization failed</title><main style="font:15px system-ui;max-width:520px;margin:12vh auto;padding:24px;color:#eee;background:#111;border:1px solid #333;border-radius:14px"><h1>Authorization could not be completed</h1><p>TC Accounts could not save this approval. Return to the application and try again.</p><a style="color:#fff" href="/login">Sign in again</a></main>',{status:503,headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}})}}
 
-if(url.pathname==="/api/support/mailbox/login"&&request.method==="POST"){
-const b=await body(request),email=typeof b?.email==="string"?b.email.trim().toLowerCase():"",password=typeof b?.password==="string"?b.password:"";
-if(!/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@theegget\.com$/i.test(email))return corsJson(request,{error:"tc_email_required",message:"Use a valid @theegget.com mailbox address."},400);
-if(!password||password.length>1024||/[\r\n\0]/.test(password))return corsJson(request,{error:"missing_credentials",message:"Enter a valid mailbox password."},400);
-try{const valid=await verifySupportMailbox(email,password,env);return valid?corsJson(request,{success:true,email,message:"Mailbox credentials verified."}):corsJson(request,{error:"invalid_credentials",message:"The TC mailbox address or password is incorrect."},401)}
-catch(e){console.error("Support mailbox authentication unavailable:",String(e?.message||e));return corsJson(request,{error:"mailbox_unavailable",message:"The mailbox service could not be reached. Try again later."},503)}
+if(url.pathname.startsWith("/api/support/mailbox/")){
+const origin=request.headers.get("origin")||"";
+if(request.method==="OPTIONS")return origin==="https://admin.theegget.com"?new Response(null,{status:204,headers:{"access-control-allow-origin":origin,"access-control-allow-methods":"POST, OPTIONS","access-control-allow-headers":"authorization, content-type","access-control-max-age":"86400","vary":"Origin"}}):json({error:"origin_not_allowed"},403);
+if(request.method!=="POST")return json({error:"method_not_allowed"},405);
+const auth=await authorizeSupportMailbox(request,env);if(auth.error)return auth.error;
+const b=await body(request),email=mailboxAddress(b?.email),password=typeof b?.password==="string"?b.password:"";
+if(!email)return supportJson(auth.origin,{error:"tc_email_required",message:"Use a valid @theegget.com mailbox address."},400);
+if(!password||password.length>1024||/[\r\n\0]/.test(password))return supportJson(auth.origin,{error:"missing_credentials",message:"Enter a valid mailbox password."},400);
+try{
+if(url.pathname==="/api/support/mailbox/login"){
+const imap=await openImap(email,password,env);await imap.close();
+return supportJson(auth.origin,{success:true,email,message:"Mailbox connected."});
+}
+if(url.pathname==="/api/support/mailbox/inbox"){
+const result=await mailboxInbox(email,password,env);return supportJson(auth.origin,result);
+}
+if(url.pathname==="/api/support/mailbox/message"){
+const uid=Number(b?.uid);if(!Number.isSafeInteger(uid)||uid<1)return supportJson(auth.origin,{error:"invalid_message"},400);
+const result=await mailboxMessage(email,password,uid,env);return supportJson(auth.origin,result);
+}
+if(url.pathname==="/api/support/mailbox/reply"){
+const uid=Number(b?.uid),reply=typeof b?.message==="string"?b.message.trim():"";
+if(!Number.isSafeInteger(uid)||uid<1||!reply||reply.length>20000)return supportJson(auth.origin,{error:"invalid_reply",message:"Enter a reply of up to 20,000 characters."},400);
+const original=await mailboxMessage(email,password,uid,env);
+const match=original.from.match(/<([^<>]+)>/),recipient=(match?.[1]||original.from).trim();
+if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(recipient)||recipient.toLowerCase()===email)return supportJson(auth.origin,{error:"invalid_recipient",message:"The original sender address could not be verified."},400);
+const subject=/^re:/i.test(original.subject)?original.subject:"Re: "+original.subject;
+await sendMailboxReply(email,password,recipient,subject,reply,original,env);
+return supportJson(auth.origin,{success:true,message:"Reply sent to the original sender."});
+}
+return supportJson(auth.origin,{error:"not_found"},404);
+}catch(e){
+const message=String(e?.message||"");
+const status=/incorrect|authentication|login/i.test(message)?401:503;
+console.error("Support mailbox request failed:",message);
+return supportJson(auth.origin,{error:status===401?"invalid_credentials":"mailbox_unavailable",message:status===401?"The TC mailbox address or password is incorrect.":"The mailbox could not be reached or processed. Try again later."},status);
+}
 }
 if(url.pathname.startsWith("/api/"))return json({error:"not_found"},404);return env.ASSETS.fetch(request)}};
