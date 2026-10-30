@@ -249,7 +249,8 @@ async function mailboxInbox(email,password,env){
       if(!uid)continue;
       messages.push({uid,from:decodeHeader(h.from||""),to:decodeHeader(h.to||""),subject:decodeHeader(h.subject||"(no subject)"),date:h.date||"",message_id:h["message-id"]||"",unread:!/\bFLAGS\s+\([^)]*\\Seen/i.test(item.line)});
     }
-    messages.sort((a,b)=>b.uid-a.uid);\n    return {messages,total:uids.length};
+    messages.sort((a,b)=>b.uid-a.uid);
+    return {messages,total:uids.length};
   }finally{await imap.close()}
 }
 async function mailboxMessage(email,password,uid,env){
