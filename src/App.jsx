@@ -115,6 +115,11 @@ export default function App() {
   const [verificationCode, setVerificationCode] = useState("");
   const [twoFactorPassword, setTwoFactorPassword] = useState("");
   const [twoFactorBusy, setTwoFactorBusy] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [emailChangePassword, setEmailChangePassword] = useState("");
+  const [emailChangeChallenge, setEmailChangeChallenge] = useState("");
+  const [emailChangeCode, setEmailChangeCode] = useState("");
+  const [emailChangeBusy, setEmailChangeBusy] = useState(false);
 
   useEffect(() => {
     const onPopState = () => setPath(window.location.pathname);
@@ -187,6 +192,15 @@ export default function App() {
         window.location.assign(returnTo || "/accounts");
         return;
       }
+      if (mode === "verify-register") {
+        const result = await request("/register/verify", { method: "POST", body: JSON.stringify({ challenge_id: challengeId, code: verificationCode }) });
+        setUser(result.user || null);
+        setVerificationCode("");
+        setChallengeId("");
+        const returnTo = consumeReturnTo(getReturnTo());
+        window.location.assign(returnTo || "/accounts");
+        return;
+      }
       if (mode === "forgot") {
         const result = await request("/password-reset/request", { method: "POST", body: JSON.stringify({ email: identifier.trim() }) });
         setMessage(result.message || "If an active TC account uses that email address, a password reset link will be sent shortly.");
@@ -209,6 +223,14 @@ export default function App() {
         ? await request("/register", { method: "POST", body: JSON.stringify({ username: identifier.trim(), email: email.trim(), password }) })
         : await request("/login", { method: "POST", body: JSON.stringify({ identifier: identifier.trim(), password }) });
       setPassword("");
+      if (result.requires_email_verification) {
+        setChallengeId(result.challenge_id);
+        setVerificationCode("");
+        setMode("verify-register");
+        setMessage(result.message || "A six-digit verification code has been sent to your email address.");
+        setMessageType("info");
+        return;
+      }
       if (result.requires_email_2fa) {
         setChallengeId(result.challenge_id);
         setVerificationCode("");
@@ -292,6 +314,41 @@ export default function App() {
     } finally {
       setTwoFactorBusy(false);
     }
+  }
+
+  async function requestEmailChange(event) {
+    event.preventDefault();
+    setEmailChangeBusy(true);
+    setMessage("");
+    try {
+      const result = await request("/email/change/request", { method: "POST", body: JSON.stringify({ email: newEmail.trim(), currentPassword: emailChangePassword }) });
+      setEmailChangeChallenge(result.challenge_id);
+      setEmailChangeCode("");
+      setEmailChangePassword("");
+      setMessage(result.message);
+      setMessageType("info");
+    } catch (error) {
+      setMessage(error.message || "A verification code could not be sent.");
+      setMessageType("error");
+    } finally { setEmailChangeBusy(false); }
+  }
+
+  async function verifyEmailChange(event) {
+    event.preventDefault();
+    setEmailChangeBusy(true);
+    setMessage("");
+    try {
+      const result = await request("/email/change/verify", { method: "POST", body: JSON.stringify({ challenge_id: emailChangeChallenge, code: emailChangeCode }) });
+      setUser(current => ({ ...current, email: result.email }));
+      setNewEmail("");
+      setEmailChangeChallenge("");
+      setEmailChangeCode("");
+      setMessage(result.message);
+      setMessageType("info");
+    } catch (error) {
+      setMessage(error.message || "The new email address could not be verified.");
+      setMessageType("error");
+    } finally { setEmailChangeBusy(false); }
   }
 
   async function createOAuthClient(event) {
@@ -401,6 +458,22 @@ export default function App() {
                   <button className="button secondary" type="submit" disabled={twoFactorBusy}>{twoFactorBusy ? "Updating…" : user.email_2fa_enabled ? "Disable email 2FA" : "Enable email 2FA"}</button>
                 </form>
                 <p className="muted">Status: {user.email_2fa_enabled ? "Enabled" : "Disabled"}</p>
+                <h2 className="section-title">Change email address</h2>
+                <p className="muted">A verification code will be sent to the new address. Your current email remains active until the code is verified.</p>
+                {!emailChangeChallenge ? (
+                  <form onSubmit={requestEmailChange}>
+                    <TextField label="New email address" type="email" value={newEmail} onChange={event => setNewEmail(event.target.value)} placeholder="new-address@example.com" autoComplete="email" />
+                    <TextField label="Current password" type="password" value={emailChangePassword} onChange={event => setEmailChangePassword(event.target.value)} autoComplete="current-password" placeholder="Confirm your password" />
+                    <button className="button secondary" type="submit" disabled={emailChangeBusy}>{emailChangeBusy ? "Sending code…" : "Send verification code"}</button>
+                  </form>
+                ) : (
+                  <form onSubmit={verifyEmailChange}>
+                    <p className="muted">Enter the six-digit code sent to {newEmail}.</p>
+                    <TextField label="Email verification code" value={emailChangeCode} onChange={event => setEmailChangeCode(event.target.value.replace(/\\D/g, "").slice(0, 6))} placeholder="000000" inputMode="numeric" autoComplete="one-time-code" maxLength={6} minLength={6} />
+                    <button className="button" type="submit" disabled={emailChangeBusy}>{emailChangeBusy ? "Verifying…" : "Verify new email"}</button>
+                    <button className="text-button" type="button" onClick={() => { setEmailChangeChallenge(""); setEmailChangeCode(""); setMessage(""); }}>Cancel email change</button>
+                  </form>
+                )}
                 <h2 className="section-title">Change password</h2>
                 <p className="muted">Enter your current password, then choose a new password with at least 12 characters.</p>
                 <form onSubmit={changePassword}>
@@ -417,17 +490,17 @@ export default function App() {
           </>
         ) : (
           <>
-            <h1>{mode === "register" ? "Create your account." : mode === "forgot" ? "Reset your password." : mode === "reset" ? "Choose a new password." : mode === "verify" ? "Verify your sign-in." : "Sign in."}</h1>
-            <p className="muted">{mode === "register" ? "Create your Theegget Creations account." : mode === "forgot" ? "Enter the email address linked to your TC account. If it matches, we’ll send a one-time reset link." : mode === "reset" ? "Choose a new password for your Theegget Creations account." : mode === "verify" ? "Enter the six-digit code sent to your registered TC account email address." : "Use your Theegget Creations account to continue."}</p>
+            <h1>{mode === "register" ? "Create your account." : mode === "forgot" ? "Reset your password." : mode === "reset" ? "Choose a new password." : mode === "verify" ? "Verify your sign-in." : mode === "verify-register" ? "Verify your email." : "Sign in."}</h1>
+            <p className="muted">{mode === "register" ? "Create your Theegget Creations account. We’ll verify your email before creating the account." : mode === "forgot" ? "Enter the email address linked to your TC account. If it matches, we’ll send a one-time reset link." : mode === "reset" ? "Choose a new password for your Theegget Creations account." : mode === "verify" ? "Enter the six-digit code sent to your registered TC account email address." : mode === "verify-register" ? "Enter the six-digit code sent to the email address you provided. Your account will be created after verification." : "Use your Theegget Creations account to continue."}</p>
             <form onSubmit={submit}>
-              {mode === "verify" ? <TextField label="Six-digit verification code" value={verificationCode} onChange={event => setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000000" inputMode="numeric" autoComplete="one-time-code" maxLength={6} minLength={6} /> : mode === "register" ? <TextField label="Username" value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="Choose a username" autoComplete="username" minLength={3} /> : mode === "login" ? <TextField label="Username or email" value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="Enter username or email" autoComplete="username" /> : mode === "forgot" ? <TextField label="Email address" type="email" value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="you@example.com" autoComplete="email" required /> : null}
+              {mode === "verify" || mode === "verify-register" ? <TextField label="Six-digit verification code" value={verificationCode} onChange={event => setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000000" inputMode="numeric" autoComplete="one-time-code" maxLength={6} minLength={6} /> : mode === "register" ? <TextField label="Username" value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="Choose a username" autoComplete="username" minLength={3} /> : mode === "login" ? <TextField label="Username or email" value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="Enter username or email" autoComplete="username" /> : mode === "forgot" ? <TextField label="Email address" type="email" value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="you@example.com" autoComplete="email" required /> : null}
               {mode === "register" && <TextField label="Email address" type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" />}
               {(mode === "login" || mode === "register" || mode === "reset") && <TextField label={mode === "reset" ? "New password" : "Password"} type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder={mode === "register" || mode === "reset" ? "At least 12 characters" : "Enter your password"} autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={mode === "login" ? undefined : 12} required />}
-              <button className="button" type="submit" disabled={busy}>{busy ? "Please wait…" : mode === "register" ? "Create account" : mode === "forgot" ? "Send reset link" : mode === "reset" ? "Reset password" : mode === "verify" ? "Verify and sign in" : "Sign in"} <span>→</span></button>
+              <button className="button" type="submit" disabled={busy}>{busy ? "Please wait…" : mode === "register" ? "Send verification code" : mode === "forgot" ? "Send reset link" : mode === "reset" ? "Reset password" : mode === "verify" ? "Verify and sign in" : mode === "verify-register" ? "Verify email and create account" : "Sign in"} <span>→</span></button>
             </form>
             {feedback}
-            {mode !== "verify" && <p className="switch-copy">{mode === "register" ? "Already have an account?" : mode === "forgot" || mode === "reset" ? "Remembered your password?" : "New to Theegget Creations?"} <button type="button" onClick={() => changeMode(mode === "register" || mode === "forgot" || mode === "reset" ? "login" : "register")}>{mode === "register" ? "Sign in instead" : mode === "forgot" || mode === "reset" ? "Back to sign in" : "Create an account"}</button></p>}
-            {mode === "verify" && <p className="switch-copy"><button type="button" onClick={() => changeMode("login")}>Cancel and return to sign in</button></p>}
+            {mode !== "verify" && mode !== "verify-register" && <p className="switch-copy">{mode === "register" ? "Already have an account?" : mode === "forgot" || mode === "reset" ? "Remembered your password?" : "New to Theegget Creations?"} <button type="button" onClick={() => changeMode(mode === "register" || mode === "forgot" || mode === "reset" ? "login" : "register")}>{mode === "register" ? "Sign in instead" : mode === "forgot" || mode === "reset" ? "Back to sign in" : "Create an account"}</button></p>}
+            {(mode === "verify" || mode === "verify-register") && <p className="switch-copy"><button type="button" onClick={() => changeMode("login")}>Cancel and return to sign in</button></p>}
             {mode !== "forgot" && mode !== "reset" && <p className="privacy-note">Your account is managed by Theegget Creations. External accounts cannot be used to sign in.</p>}
           </>
         )}
