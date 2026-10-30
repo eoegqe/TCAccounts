@@ -107,6 +107,10 @@ export default function App() {
   const [redirectUris, setRedirectUris] = useState(() => getRegistrationDefaults().redirectUri);
   const [clientBusy, setClientBusy] = useState(false);
   const [accountSection, setAccountSection] = useState("overview");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordBusy, setPasswordBusy] = useState(false);
 
   useEffect(() => {
     const onPopState = () => setPath(window.location.pathname);
@@ -219,6 +223,33 @@ export default function App() {
     }
   }
 
+  async function changePassword(event) {
+    event.preventDefault();
+    setMessage("");
+    if (newPassword !== confirmPassword) {
+      setMessage("The new passwords do not match.");
+      setMessageType("error");
+      return;
+    }
+    setPasswordBusy(true);
+    try {
+      const result = await request("/password/change", {
+        method: "POST",
+        body: JSON.stringify({ currentPassword, newPassword })
+      });
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setMessage(result.message || "Your password has been changed.");
+      setMessageType("info");
+    } catch (error) {
+      setMessage(error.message || "Your password could not be changed.");
+      setMessageType("error");
+    } finally {
+      setPasswordBusy(false);
+    }
+  }
+
   async function createOAuthClient(event) {
     event.preventDefault();
     setClientBusy(true);
@@ -317,7 +348,18 @@ export default function App() {
               <button className={accountSection === "security" ? "selected" : ""} onClick={() => setAccountSection("security")}>Security</button>
               <a href="/auth">Connected apps ↗</a>
             </nav>
-            {accountSection === "security" && <div className="notice"><strong>Account security</strong><p>Password recovery and active-session management are not available yet. Keep your password private and sign out on shared devices.</p></div>}
+            {accountSection === "security" && (
+              <div className="security-section">
+                <h2 className="section-title">Change password</h2>
+                <p className="muted">Enter your current password, then choose a new password with at least 12 characters.</p>
+                <form onSubmit={changePassword}>
+                  <TextField label="Current password" type="password" value={currentPassword} onChange={event => setCurrentPassword(event.target.value)} autoComplete="current-password" placeholder="Enter current password" />
+                  <TextField label="New password" type="password" value={newPassword} onChange={event => setNewPassword(event.target.value)} autoComplete="new-password" placeholder="At least 12 characters" minLength={12} />
+                  <TextField label="Confirm new password" type="password" value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} autoComplete="new-password" placeholder="Enter the new password again" minLength={12} />
+                  <button className="button" type="submit" disabled={passwordBusy}>{passwordBusy ? "Changing password…" : "Change password"} <span>→</span></button>
+                </form>
+              </div>
+            )}
             {accountSection === "overview" && <p className="muted">Your TC identity can be used with applications that support Sign in with TC.</p>}
             <button className="button secondary" disabled={busy} onClick={logout}>{busy ? "Signing out…" : "Sign out"} <span>↗</span></button>
             {feedback}
