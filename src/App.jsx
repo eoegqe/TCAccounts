@@ -168,6 +168,8 @@ export default function App() {
     setMode(nextMode);
     setPassword("");
     setMessage("");
+    setChallengeId("");
+    setVerificationCode("");
     if (nextMode !== "reset") setResetToken("");
   }
 
@@ -418,13 +420,14 @@ export default function App() {
             <h1>{mode === "register" ? "Create your account." : mode === "forgot" ? "Reset your password." : mode === "reset" ? "Choose a new password." : mode === "verify" ? "Verify your sign-in." : "Sign in."}</h1>
             <p className="muted">{mode === "register" ? "Create your Theegget Creations account." : mode === "forgot" ? "Enter the email address linked to your TC account. If it matches, we’ll send a one-time reset link." : mode === "reset" ? "Choose a new password for your Theegget Creations account." : mode === "verify" ? "Enter the six-digit code sent to your registered TC account email address." : "Use your Theegget Creations account to continue."}</p>
             <form onSubmit={submit}>
-              {mode === "verify" ? <TextField label="Six-digit verification code" value={verificationCode} onChange={event => setVerificationCode(event.target.value.replace(/\\D/g, "").slice(0, 6))} placeholder="000000" inputMode="numeric" autoComplete="one-time-code" maxLength={6} minLength={6} /> : mode === "register" ? <TextField label="Username" value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="Choose a username" autoComplete="username" minLength={3} /> : mode === "login" ? <TextField label="Username or email" value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="Enter username or email" autoComplete="username" /> : mode === "forgot" ? <TextField label="Email address" type="email" value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="you@example.com" autoComplete="email" required /> : null}
+              {mode === "verify" ? <TextField label="Six-digit verification code" value={verificationCode} onChange={event => setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000000" inputMode="numeric" autoComplete="one-time-code" maxLength={6} minLength={6} /> : mode === "register" ? <TextField label="Username" value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="Choose a username" autoComplete="username" minLength={3} /> : mode === "login" ? <TextField label="Username or email" value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="Enter username or email" autoComplete="username" /> : mode === "forgot" ? <TextField label="Email address" type="email" value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="you@example.com" autoComplete="email" required /> : null}
               {mode === "register" && <TextField label="Email address" type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" />}
               {(mode === "login" || mode === "register" || mode === "reset") && <TextField label={mode === "reset" ? "New password" : "Password"} type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder={mode === "register" || mode === "reset" ? "At least 12 characters" : "Enter your password"} autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={mode === "login" ? undefined : 12} required />}
               <button className="button" type="submit" disabled={busy}>{busy ? "Please wait…" : mode === "register" ? "Create account" : mode === "forgot" ? "Send reset link" : mode === "reset" ? "Reset password" : mode === "verify" ? "Verify and sign in" : "Sign in"} <span>→</span></button>
             </form>
             {feedback}
-            <p className="switch-copy">{mode === "register" ? "Already have an account?" : mode === "forgot" || mode === "reset" ? "Remembered your password?" : "New to Theegget Creations?"} <button type="button" onClick={() => changeMode(mode === "register" || mode === "forgot" || mode === "reset" ? "login" : "register")}>{mode === "register" ? "Sign in instead" : mode === "forgot" || mode === "reset" ? "Back to sign in" : "Create an account"}</button></p>
+            {mode !== "verify" && <p className="switch-copy">{mode === "register" ? "Already have an account?" : mode === "forgot" || mode === "reset" ? "Remembered your password?" : "New to Theegget Creations?"} <button type="button" onClick={() => changeMode(mode === "register" || mode === "forgot" || mode === "reset" ? "login" : "register")}>{mode === "register" ? "Sign in instead" : mode === "forgot" || mode === "reset" ? "Back to sign in" : "Create an account"}</button></p>}
+            {mode === "verify" && <p className="switch-copy"><button type="button" onClick={() => changeMode("login")}>Cancel and return to sign in</button></p>}
             {mode !== "forgot" && mode !== "reset" && <p className="privacy-note">Your account is managed by Theegget Creations. External accounts cannot be used to sign in.</p>}
           </>
         )}
