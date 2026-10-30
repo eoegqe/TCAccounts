@@ -294,7 +294,7 @@ try{console.log("OAuth approval: session present; validating client and saving a
 if(url.pathname==="/api/support/mailbox/login"&&request.method==="POST"){
 const b=await body(request),email=typeof b?.email==="string"?b.email.trim().toLowerCase():"",password=typeof b?.password==="string"?b.password:"";
 if(!/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@theegget\.com$/i.test(email))return corsJson(request,{error:"tc_email_required",message:"Use a valid @theegget.com mailbox address."},400);
-if(!password||password.length>1024)return corsJson(request,{error:"missing_credentials",message:"Enter your mailbox password."},400);
+if(!password||password.length>1024||/[\r\n\0]/.test(password))return corsJson(request,{error:"missing_credentials",message:"Enter a valid mailbox password."},400);
 try{const valid=await verifySupportMailbox(email,password,env);return valid?corsJson(request,{success:true,email,message:"Mailbox credentials verified."}):corsJson(request,{error:"invalid_credentials",message:"The TC mailbox address or password is incorrect."},401)}
 catch(e){console.error("Support mailbox authentication unavailable:",String(e?.message||e));return corsJson(request,{error:"mailbox_unavailable",message:"The mailbox service could not be reached. Try again later."},503)}
 }
