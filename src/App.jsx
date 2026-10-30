@@ -111,6 +111,10 @@ export default function App() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordBusy, setPasswordBusy] = useState(false);
+  const [challengeId, setChallengeId] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
+  const [twoFactorPassword, setTwoFactorPassword] = useState("");
+  const [twoFactorBusy, setTwoFactorBusy] = useState(false);
 
   useEffect(() => {
     const onPopState = () => setPath(window.location.pathname);
@@ -172,6 +176,15 @@ export default function App() {
     setBusy(true);
     setMessage("");
     try {
+      if (mode === "verify") {
+        const result = await request("/login/verify", { method: "POST", body: JSON.stringify({ challenge_id: challengeId, code: verificationCode }) });
+        setUser(result.user || null);
+        setVerificationCode("");
+        setChallengeId("");
+        const returnTo = consumeReturnTo(getReturnTo());
+        window.location.assign(returnTo || "/accounts");
+        return;
+      }
       if (mode === "forgot") {
         const result = await request("/password-reset/request", { method: "POST", body: JSON.stringify({ email: identifier.trim() }) });
         setMessage(result.message || "If an active TC account uses that email address, a password reset link will be sent shortly.");
@@ -193,8 +206,16 @@ export default function App() {
       const result = mode === "register"
         ? await request("/register", { method: "POST", body: JSON.stringify({ username: identifier.trim(), email: email.trim(), password }) })
         : await request("/login", { method: "POST", body: JSON.stringify({ identifier: identifier.trim(), password }) });
-      setUser(result.user || null);
       setPassword("");
+      if (result.requires_email_2fa) {
+        setChallengeId(result.challenge_id);
+        setVerificationCode("");
+        setMode("verify");
+        setMessage("A six-digit verification code has been sent to your TC account email address.");
+        setMessageType("info");
+        return;
+      }
+      setUser(result.user || null);
       const returnTo = consumeReturnTo(getReturnTo());
       window.location.assign(returnTo || "/accounts");
     } catch (error) {
@@ -247,6 +268,27 @@ export default function App() {
       setMessageType("error");
     } finally {
       setPasswordBusy(false);
+    }
+  }
+
+  async function toggleEmail2FA(event) {
+    event.preventDefault();
+    setTwoFactorBusy(true);
+    setMessage("");
+    try {
+      const result = await request("/security/email-2fa", {
+        method: "POST",
+        body: JSON.stringify({ enabled: !user.email_2fa_enabled, currentPassword: twoFactorPassword })
+      });
+      setUser(current => ({ ...current, email_2fa_enabled: result.email_2fa_enabled }));
+      setTwoFactorPassword("");
+      setMessage(result.message);
+      setMessageType("info");
+    } catch (error) {
+      setMessage(error.message || "The email 2FA setting could not be changed.");
+      setMessageType("error");
+    } finally {
+      setTwoFactorBusy(false);
     }
   }
 
@@ -350,6 +392,13 @@ export default function App() {
             </nav>
             {accountSection === "security" && (
               <div className="security-section">
+                <h2 className="section-title">Email two-factor authentication</h2>
+                <p className="muted">When enabled, TC Accounts will email a one-time code after your password is accepted on a new sign-in.</p>
+                <form onSubmit={toggleEmail2FA}>
+                  <TextField label="Current password" type="password" value={twoFactorPassword} onChange={event => setTwoFactorPassword(event.target.value)} autoComplete="current-password" placeholder="Confirm your password" />
+                  <button className="button secondary" type="submit" disabled={twoFactorBusy}>{twoFactorBusy ? "Updating…" : user.email_2fa_enabled ? "Disable email 2FA" : "Enable email 2FA"}</button>
+                </form>
+                <p className="muted">Status: {user.email_2fa_enabled ? "Enabled" : "Disabled"}</p>
                 <h2 className="section-title">Change password</h2>
                 <p className="muted">Enter your current password, then choose a new password with at least 12 characters.</p>
                 <form onSubmit={changePassword}>
@@ -366,13 +415,13 @@ export default function App() {
           </>
         ) : (
           <>
-            <h1>{mode === "register" ? "Create your account." : mode === "forgot" ? "Reset your password." : mode === "reset" ? "Choose a new password." : "Sign in."}</h1>
-            <p className="muted">{mode === "register" ? "Create your Theegget Creations account." : mode === "forgot" ? "Enter the email address linked to your TC account. If it matches, we’ll send a one-time reset link." : mode === "reset" ? "Choose a new password for your Theegget Creations account." : "Use your Theegget Creations account to continue."}</p>
+            <h1>{mode === "register" ? "Create your account." : mode === "forgot" ? "Reset your password." : mode === "reset" ? "Choose a new password." : mode === "verify" ? "Verify your sign-in." : "Sign in."}</h1>
+            <p className="muted">{mode === "register" ? "Create your Theegget Creations account." : mode === "forgot" ? "Enter the email address linked to your TC account. If it matches, we’ll send a one-time reset link." : mode === "reset" ? "Choose a new password for your Theegget Creations account." : mode === "verify" ? "Enter the six-digit code sent to your registered TC account email address." : "Use your Theegget Creations account to continue."}</p>
             <form onSubmit={submit}>
-              {mode === "register" ? <TextField label="Username" value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="Choose a username" autoComplete="username" minLength={3} /> : mode === "login" ? <TextField label="Username or email" value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="Enter username or email" autoComplete="username" /> : mode === "forgot" ? <TextField label="Email address" type="email" value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="you@example.com" autoComplete="email" required /> : null}
+              {mode === "verify" ? <TextField label="Six-digit verification code" value={verificationCode} onChange={event => setVerificationCode(event.target.value.replace(/\\D/g, "").slice(0, 6))} placeholder="000000" inputMode="numeric" autoComplete="one-time-code" maxLength={6} minLength={6} /> : mode === "register" ? <TextField label="Username" value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="Choose a username" autoComplete="username" minLength={3} /> : mode === "login" ? <TextField label="Username or email" value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="Enter username or email" autoComplete="username" /> : mode === "forgot" ? <TextField label="Email address" type="email" value={identifier} onChange={event => setIdentifier(event.target.value)} placeholder="you@example.com" autoComplete="email" required /> : null}
               {mode === "register" && <TextField label="Email address" type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" />}
               {(mode === "login" || mode === "register" || mode === "reset") && <TextField label={mode === "reset" ? "New password" : "Password"} type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder={mode === "register" || mode === "reset" ? "At least 12 characters" : "Enter your password"} autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={mode === "login" ? undefined : 12} required />}
-              <button className="button" type="submit" disabled={busy}>{busy ? "Please wait…" : mode === "register" ? "Create account" : mode === "forgot" ? "Send reset link" : mode === "reset" ? "Reset password" : "Sign in"} <span>→</span></button>
+              <button className="button" type="submit" disabled={busy}>{busy ? "Please wait…" : mode === "register" ? "Create account" : mode === "forgot" ? "Send reset link" : mode === "reset" ? "Reset password" : mode === "verify" ? "Verify and sign in" : "Sign in"} <span>→</span></button>
             </form>
             {feedback}
             <p className="switch-copy">{mode === "register" ? "Already have an account?" : mode === "forgot" || mode === "reset" ? "Remembered your password?" : "New to Theegget Creations?"} <button type="button" onClick={() => changeMode(mode === "register" || mode === "forgot" || mode === "reset" ? "login" : "register")}>{mode === "register" ? "Sign in instead" : mode === "forgot" || mode === "reset" ? "Back to sign in" : "Create an account"}</button></p>
