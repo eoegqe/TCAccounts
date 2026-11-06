@@ -64,10 +64,16 @@ function getRegistrationDefaults() {
   if (!candidate) return { name: "", redirectUri: "" };
   try {
     const url = new URL(candidate);
-    if (url.protocol !== "https:" || url.username || url.password) return { name: "", redirectUri: "" };
-    const redirectUri = url.origin + (url.pathname || "/");
-    const name = url.hostname.includes("eggser") ? "Eggser Control Center" : url.hostname;
-    return { name, redirectUri };
+    if (url.username || url.password || url.hash) return { name: "", redirectUri: "" };
+    if (url.protocol === "https:") {
+      const redirectUri = url.origin + (url.pathname || "/");
+      const name = url.hostname.includes("eggser") ? "Eggser Control Center" : url.hostname;
+      return { name, redirectUri };
+    }
+    if (url.protocol === "tac:" && url.hostname === "oauth" && url.pathname === "/callback" && !url.search) {
+      return { name: "TAC — The Admin Console", redirectUri: "tac://oauth/callback" };
+    }
+    return { name: "", redirectUri: "" };
   } catch {
     return { name: "", redirectUri: "" };
   }
