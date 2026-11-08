@@ -444,6 +444,21 @@ export default function App() {
             <p className="muted">Sign in to manage your Theegget Creations account.</p>
             <button className="button" onClick={() => navigate("/")}>Go to sign in <span>→</span></button>
           </>
+        ) : accountsPage && user && Number(user.role) === 0 ? (
+          <>
+            <p className="eyebrow">ACCOUNT STATUS</p>
+            <h1>Access restricted</h1>
+            <p className="muted">This TC account has been banned. Sign-in is available only to review this notice; connected applications and TC services are restricted.</p>
+            <div className="profile">
+              <div><span>Username</span><strong>{user.username}</strong></div>
+              <div><span>Account ID</span><strong>{user.id}</strong></div>
+              <div><span>Status</span><strong>Banned</strong></div>
+            </div>
+            <h2 className="section-title">Ban reason</h2>
+            <p className="muted" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{user.ban_reason || "No ban reason was recorded. Contact TC support for assistance."}</p>
+            <button className="button secondary" disabled={busy} onClick={logout}>{busy ? "Signing out…" : "Sign out"} <span>↗</span></button>
+            {feedback}
+          </>
         ) : accountsPage && user ? (
           <>
             <p className="eyebrow">ACCOUNT OVERVIEW</p>
