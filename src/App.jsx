@@ -79,8 +79,28 @@ function getRegistrationDefaults() {
   }
 }
 
-async function request(path, options = {}) {
-  const response = await fetch(API + path, {
+function accountSlotFromPath(pathname) {
+  const parts = String(pathname || "/").split("/").filter(Boolean);
+  const match = (parts[parts.length - 1] || "").match(/^u([0-9]+)$/);
+  return parts.length >= 2 && match && Number(match[1]) >= 2 ? Number(match[1]) : 0;
+}
+
+function pagePath(pathname) {
+  const parts = String(pathname || "/").split("/").filter(Boolean);
+  const match = (parts[parts.length - 1] || "").match(/^u([0-9]+)$/);
+  if (parts.length >= 2 && match && Number(match[1]) >= 2) parts.pop();
+  return "/" + parts.join("/");
+}
+
+function slotPath(pathname, slot) {
+  const clean = pagePath(pathname);
+  return Number(slot) >= 2 ? clean + "/u" + Number(slot) : clean;
+}
+
+async function request(path, options = {}, slotOverride) {
+  const slot = slotOverride === undefined ? accountSlotFromPath(window.location.pathname) : Number(slotOverride);
+  const suffix = slot >= 2 ? "/u" + slot : "";
+  const response = await fetch(API + path + suffix, {
     ...options,
     credentials: "same-origin",
     headers: { "content-type": "application/json", ...options.headers }
@@ -114,6 +134,8 @@ export default function App() {
   const [messageType, setMessageType] = useState("info");
   const [path, setPath] = useState(window.location.pathname);
   const [oauthClients, setOauthClients] = useState([]);
+  const [accountSlots, setAccountSlots] = useState([]);
+  const [accountSlotsBusy, setAccountSlotsBusy] = useState(false);
   const [clientName, setClientName] = useState(() => getRegistrationDefaults().name);
   const [redirectUris, setRedirectUris] = useState(() => getRegistrationDefaults().redirectUri);
   const [clientBusy, setClientBusy] = useState(false);
@@ -151,13 +173,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (loading || !user || (path !== "/" && path !== "/login") || mode === "reset") return;
+    if (loading || !user || (pagePath(path) !== "/" && pagePath(path) !== "/login") || mode === "reset") return;
     const returnTo = consumeReturnTo(getReturnTo());
     window.location.replace(returnTo || "/accounts");
   }, [loading, user, path, mode]);
 
   useEffect(() => {
-    if (!user || !isOwnerAccount(user) || path !== "/auth") return;
+    if (!user || !isOwnerAccount(user) || pagePath(path) !== "/auth") return;
     let active = true;
     request("/oauth/clients").then(result => {
       if (active) setOauthClients(result.clients || []);
@@ -171,8 +193,27 @@ export default function App() {
     return () => { active = false; };
   }, [user, path]);
 
-  const accountsPage = path === "/accounts" || path.startsWith("/accounts/");
-  const authPage = path === "/auth" || path.startsWith("/auth/");
+  useEffect(() => {
+    if (!user || !(pagePath(path) === "/accounts" || pagePath(path).startsWith("/accounts/"))) {
+      setAccountSlots([]);
+      return;
+    }
+    let active = true;
+    setAccountSlotsBusy(true);
+    request("/account-slots").then(result => {
+      if (active) setAccountSlots(result.slots || []);
+    }).catch(() => {
+      if (active) setAccountSlots([]);
+    }).finally(() => {
+      if (active) setAccountSlotsBusy(false);
+    });
+    return () => { active = false; };
+  }, [user, path]);
+
+  const activeSlot = accountSlotFromPath(path);
+  const accountsRoute = pagePath(path);
+  const accountsPage = accountsRoute === "/accounts" || accountsRoute.startsWith("/accounts/");
+  const authPage = accountsRoute === "/auth" || accountsRoute.startsWith("/auth/");
 
   function navigate(nextPath) {
     window.history.pushState({}, "", nextPath);
@@ -200,7 +241,7 @@ export default function App() {
         setVerificationCode("");
         setChallengeId("");
         const returnTo = consumeReturnTo(getReturnTo());
-        window.location.assign(returnTo || "/accounts");
+        window.location.assign(returnTo || slotPath("/accounts", activeSlot));
         return;
       }
       if (mode === "verify-register") {
@@ -209,7 +250,7 @@ export default function App() {
         setVerificationCode("");
         setChallengeId("");
         const returnTo = consumeReturnTo(getReturnTo());
-        window.location.assign(returnTo || "/accounts");
+        window.location.assign(returnTo || slotPath("/accounts", activeSlot));
         return;
       }
       if (mode === "forgot") {
@@ -252,7 +293,7 @@ export default function App() {
       }
       setUser(result.user || null);
       const returnTo = consumeReturnTo(getReturnTo());
-      window.location.assign(returnTo || "/accounts");
+      window.location.assign(returnTo || slotPath("/accounts", activeSlot));
     } catch (error) {
       setMessage(error.message || "We couldn't complete that request.");
       setMessageType("error");
@@ -276,6 +317,33 @@ export default function App() {
       setMessageType("error");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function addAccountSlot() {
+    const used = new Set(accountSlots.map(item => Number(item.slot)));
+    let slot = 2;
+    while (used.has(slot) && slot < 21) slot++;
+    if (slot >= 21) {
+      setMessage("The maximum number of signed-in account slots has been reached.");
+      setMessageType("error");
+      return;
+    }
+    window.location.assign("/login/u" + slot + "?return_to=" + encodeURIComponent("/accounts/u" + slot));
+  }
+
+  async function removeAccountSlot(slot) {
+    if (!window.confirm("Sign out this account on this device? The TC account itself will not be deleted.")) return;
+    setAccountSlotsBusy(true);
+    try {
+      await request("/logout", { method: "POST", body: "{}" }, slot);
+      setAccountSlots(items => items.filter(item => Number(item.slot) !== Number(slot)));
+      if (Number(slot) === activeSlot) window.location.assign("/accounts");
+    } catch (error) {
+      setMessage(error.message || "The account slot could not be removed.");
+      setMessageType("error");
+    } finally {
+      setAccountSlotsBusy(false);
     }
   }
 
@@ -447,7 +515,7 @@ export default function App() {
           <>
             <h1>Sign in required</h1>
             <p className="muted">Sign in to manage your Theegget Creations account.</p>
-            <button className="button" onClick={() => navigate("/")}>Go to sign in <span>→</span></button>
+            <button className="button" onClick={() => navigate(slotPath("/login", activeSlot))}>Go to sign in <span>→</span></button>
           </>
         ) : accountsPage && user && Number(user.role) === 0 ? (
           <>
@@ -476,10 +544,19 @@ export default function App() {
               <div><span>Account ID</span><strong>{user.id}</strong></div>
               <div><span>TCAdmin role</span><strong>{ROLE_LABELS[Number(user.role ?? 1)] || "User"}</strong></div>
             </div>
+            <section className="account-switcher">
+              <div className="account-switcher-heading"><strong>Signed-in accounts</strong><button type="button" onClick={addAccountSlot} disabled={accountSlotsBusy}>Add account +</button></div>
+              {accountSlots.length === 0 ? <p className="muted">{accountSlotsBusy ? "Loading account slots…" : "No additional accounts are signed in."}</p> : accountSlots.map(item => (
+                <div className={Number(item.slot) === activeSlot ? "account-slot active" : "account-slot"} key={item.slot}>
+                  <a href={slotPath("/accounts", item.slot)}><span>{item.user.username}</span><small>{Number(item.slot) === 0 ? "Main account" : "u" + item.slot}{Number(item.slot) === activeSlot ? " · Current" : ""}</small></a>
+                  <button type="button" className="text-button danger" onClick={() => removeAccountSlot(item.slot)} disabled={accountSlotsBusy}>Remove</button>
+                </div>
+              ))}
+            </section>
             <nav className="account-actions">
               <button className={accountSection === "overview" ? "selected" : ""} onClick={() => setAccountSection("overview")}>Overview</button>
               <button className={accountSection === "security" ? "selected" : ""} onClick={() => setAccountSection("security")}>Security</button>
-              <a href="/auth">Connected apps ↗</a>
+              <a href={slotPath("/auth", activeSlot)}>Connected apps ↗</a>
             </nav>
             {accountSection === "security" && (
               <div className="security-section">
