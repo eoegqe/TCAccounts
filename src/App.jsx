@@ -323,12 +323,7 @@ export default function App() {
   async function addAccountSlot() {
     const used = new Set(accountSlots.map(item => Number(item.slot)));
     let slot = 2;
-    while (used.has(slot) && slot < 100) slot++;
-    if (slot >= 100) {
-      setMessage("The maximum number of signed-in account slots has been reached.");
-      setMessageType("error");
-      return;
-    }
+    while (used.has(slot)) slot++;
     window.location.assign("/login/u" + slot + "?return_to=" + encodeURIComponent("/accounts/u" + slot));
   }
 
