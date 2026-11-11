@@ -34,7 +34,7 @@ function getReturnTo() {
   } catch {}
 
   // App-registration links may return to their own registration screen after sign-in.
-  if (window.location.pathname === "/auth" && candidate) {
+  if (pagePath(window.location.pathname) === "/auth" && candidate) {
     try {
       const target = new URL(candidate);
       if (
