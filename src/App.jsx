@@ -175,7 +175,7 @@ export default function App() {
   useEffect(() => {
     if (loading || !user || (pagePath(path) !== "/" && pagePath(path) !== "/login") || mode === "reset") return;
     const returnTo = consumeReturnTo(getReturnTo());
-    window.location.replace(returnTo || "/accounts");
+    window.location.replace(returnTo || slotPath("/accounts", activeSlot));
   }, [loading, user, path, mode]);
 
   useEffect(() => {
@@ -323,8 +323,8 @@ export default function App() {
   async function addAccountSlot() {
     const used = new Set(accountSlots.map(item => Number(item.slot)));
     let slot = 2;
-    while (used.has(slot) && slot < 21) slot++;
-    if (slot >= 21) {
+    while (used.has(slot) && slot < 100) slot++;
+    if (slot >= 100) {
       setMessage("The maximum number of signed-in account slots has been reached.");
       setMessageType("error");
       return;
@@ -485,13 +485,13 @@ export default function App() {
           <>
             <h1>Access restricted</h1>
             <p className="muted">Connected application management is reserved for TC Accounts user ID 1.</p>
-            <a className="button secondary" href="/accounts">Back to account <span>↗</span></a>
+            <a className="button secondary" href={slotPath("/accounts", activeSlot)}>Back to account <span>↗</span></a>
           </>
         ) : authPage && user && isOwnerAccount(user) ? (
           <>
             <h1>Connected applications</h1>
             <p className="muted">Manage apps that can request permission to use your TC identity. When you open this page from an app link, its name and HTTPS redirect URL are filled in for you; review them and register the app below.</p>
-            <a className="button secondary" href="/accounts">Back to account <span>↗</span></a>
+            <a className="button secondary" href={slotPath("/accounts", activeSlot)}>Back to account <span>↗</span></a>
             <h2 className="section-title">Register an application</h2>
             <form onSubmit={createOAuthClient}>
               <TextField label="Application name" value={clientName} onChange={event => setClientName(event.target.value)} placeholder="Eggser Control Center" minLength={2} maxLength={80} />
