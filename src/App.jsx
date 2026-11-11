@@ -92,6 +92,11 @@ async function request(path, options = {}) {
 
 const ROLE_LABELS = { 0: "Banned", 1: "User", 2: "Support", 3: "Admin", 4: "Co-owner", 5: "Owner" };
 
+function isOwnerAccount(user) {
+  const id = Number(user?.id);
+  return Number.isSafeInteger(id) && id === 1;
+}
+
 function TextField({ label, ...props }) {
   return <label className="field"><span>{label}</span><input {...props} required /></label>;
 }
@@ -152,7 +157,7 @@ export default function App() {
   }, [loading, user, path, mode]);
 
   useEffect(() => {
-    if (!user || user.id !== 1 || path !== "/auth") return;
+    if (!user || !isOwnerAccount(user) || path !== "/auth") return;
     let active = true;
     request("/oauth/clients").then(result => {
       if (active) setOauthClients(result.clients || []);
@@ -408,13 +413,13 @@ export default function App() {
         <div className="brand-lockup"><span className="tc-mark">TC</span><span className="brand-name">Theegget Creations</span></div>
         <div className="panel-heading"><span>{authPage ? "CONNECTED APPLICATIONS" : accountsPage ? "YOUR ACCOUNT" : "ACCOUNT ACCESS"}</span><span className="panel-status">{user ? "SIGNED IN" : "SECURE SIGN-IN"}</span></div>
 
-        {authPage && user && user.id !== 1 ? (
+        {authPage && user && !isOwnerAccount(user) ? (
           <>
             <h1>Access restricted</h1>
             <p className="muted">Connected application management is reserved for TC Accounts user ID 1.</p>
             <a className="button secondary" href="/accounts">Back to account <span>↗</span></a>
           </>
-        ) : authPage && user && user.id === 1 ? (
+        ) : authPage && user && isOwnerAccount(user) ? (
           <>
             <h1>Connected applications</h1>
             <p className="muted">Manage apps that can request permission to use your TC identity. When you open this page from an app link, its name and HTTPS redirect URL are filled in for you; review them and register the app below.</p>
