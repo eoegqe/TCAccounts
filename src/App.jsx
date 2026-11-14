@@ -140,6 +140,8 @@ export default function App() {
   const [redirectUris, setRedirectUris] = useState(() => getRegistrationDefaults().redirectUri);
   const [clientBusy, setClientBusy] = useState(false);
   const [accountSection, setAccountSection] = useState("overview");
+  const [adminPreviewRole, setAdminPreviewRole] = useState("");
+  const [adminPreviewBusy, setAdminPreviewBusy] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -177,6 +179,11 @@ export default function App() {
     const returnTo = consumeReturnTo(getReturnTo());
     window.location.replace(returnTo || slotPath("/accounts", activeSlot));
   }, [loading, user, path, mode]);
+
+  useEffect(() => {
+    if (!user || !isOwnerAccount(user) || pagePath(path) !== "/accounts" && !pagePath(path).startsWith("/accounts/")) return;
+    request("/tcadmin/role-preview").then(result => setAdminPreviewRole(result.preview_role || "")).catch(() => setAdminPreviewRole(""));
+  }, [user?.id, path]);
 
   useEffect(() => {
     if (!user || !isOwnerAccount(user) || pagePath(path) !== "/auth") return;
@@ -451,6 +458,19 @@ export default function App() {
     }
   }
 
+  async function saveAdminPreviewRole(value) {
+    setAdminPreviewBusy(true);
+    try {
+      const result = await request("/tcadmin/role-preview", { method: "POST", body: JSON.stringify({ preview_role: value || null }) });
+      setAdminPreviewRole(result.preview_role || "");
+      setMessage(value ? `TC Admin will display the ${ROLE_LABELS[Number(value)]} role.` : "TC Admin will display your actual Owner role.");
+      setMessageType("info");
+    } catch (error) {
+      setMessage(error.message || "Could not update the TC Admin preview role.");
+      setMessageType("error");
+    } finally { setAdminPreviewBusy(false); }
+  }
+
   async function deleteOAuthClient(clientId) {
     if (!window.confirm("Revoke and delete this application? Its existing tokens will no longer be usable.")) return;
     try {
@@ -551,6 +571,7 @@ export default function App() {
             <nav className="account-actions">
               <button className={accountSection === "overview" ? "selected" : ""} onClick={() => setAccountSection("overview")}>Overview</button>
               <button className={accountSection === "security" ? "selected" : ""} onClick={() => setAccountSection("security")}>Security</button>
+              {isOwnerAccount(user) && <button className={accountSection === "developer" ? "selected" : ""} onClick={() => setAccountSection("developer")}>Developer</button>}
               <a href={slotPath("/auth", activeSlot)}>Connected apps ↗</a>
             </nav>
             {accountSection === "security" && (
@@ -589,6 +610,7 @@ export default function App() {
               </div>
             )}
             {accountSection === "overview" && <p className="muted">Your TC identity can be used with applications that support Sign in with TC.</p>}
+            {accountSection === "developer" && isOwnerAccount(user) && <section className="security-section"><h2 className="section-title">TC Admin role preview</h2><p className="muted">Choose which role TC Admin displays when you open it. This is a visual preview for your Owner account only. It never changes your real role or server permissions.</p><label className="field"><span>Act as role</span><select value={adminPreviewRole} disabled={adminPreviewBusy} onChange={event => saveAdminPreviewRole(event.target.value)}><option value="">5 · Owner (actual role)</option>{Object.entries(ROLE_LABELS).filter(([id]) => Number(id) !== 5).map(([id,label]) => <option key={id} value={id}>{id} · {label}</option>)}</select></label></section>}
             <button className="button secondary" disabled={busy} onClick={logout}>{busy ? "Signing out…" : "Sign out"} <span>↗</span></button>
             {feedback}
           </>
