@@ -462,8 +462,9 @@ if((url.pathname||"").match(/^\/api\/public\/account-status\/\d+$/)&&request.met
 const accountId=Number(url.pathname.split("/").pop());
 if(!Number.isSafeInteger(accountId)||accountId<1)return json({error:"invalid_account_id"},400);
 try{
-const account=await env.TC.prepare("SELECT role FROM users WHERE id=? AND status='active'").bind(accountId).first();
-return json({is_banned:Boolean(account&&Number(account.role)===0)});
+await env.TC.prepare("CREATE TABLE IF NOT EXISTS tcadmin_bans (user_id INTEGER PRIMARY KEY, reason TEXT NOT NULL, actor_id INTEGER NOT NULL, created_at TEXT NOT NULL)").run();
+const account=await env.TC.prepare("SELECT u.role,b.reason AS ban_reason FROM users u LEFT JOIN tcadmin_bans b ON b.user_id=u.id WHERE u.id=? AND u.status='active'").bind(accountId).first();
+return json({is_banned:Boolean(account&&Number(account.role)===0),ban_reason:account&&Number(account.role)===0?String(account.ban_reason||"").slice(0,240):""});
 }catch(e){console.error("Public account status lookup failed:",String(e?.message||e));return json({error:"account_status_unavailable"},503)}
 }
 if(url.pathname==="/oauth/userinfo"&&request.method==="GET"){
