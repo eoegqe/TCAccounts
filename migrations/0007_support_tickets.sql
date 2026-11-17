@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS support_tickets (
   sender_email TEXT NOT NULL,
   subject TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'Open' CHECK (status IN ('Open', 'In Progress', 'Waiting for User', 'Resolved', 'Closed')),
+  acknowledgement_sent INTEGER NOT NULL DEFAULT 0,
   assigned_admin_id TEXT,
   assigned_admin_username TEXT,
   created_at TEXT NOT NULL,
