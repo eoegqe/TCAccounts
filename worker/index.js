@@ -305,7 +305,90 @@ async function sendMailboxReply(email,password,recipient,subject,body,original,s
 }
 
 
-export default {async fetch(request,env){const url=new URL(request.url);const parts=url.pathname.split("/").filter(Boolean),first=(parts[0]||"").match(/^u([0-9]+)$/),last=(parts[parts.length-1]||"").match(/^u([0-9]+)$/);if(first&&parts.length>1)return new Response("<!doctype html><meta charset=utf-8><title>Wrong URL format</title><main style='font:15px system-ui;max-width:520px;margin:12vh auto;padding:28px;background:#111;color:#eee;border:1px solid #333;border-radius:14px'><h1>Wrong URL format</h1><p>The account slot must come after the page name. Move the account slot to the end of the URL.</p></main>",{status:400,headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}});if(last&&parts.length===1)return Response.redirect(new URL("/",url),308);if(last&&parts.length>=2){const n=Number(last[1]);if(n===0){url.pathname="/"+parts.slice(0,-1).join("/");return Response.redirect(url,308)}if(n===1)return new Response("<!doctype html><meta charset=utf-8><title>Wrong URL format</title><main style='font:15px system-ui;max-width:520px;margin:12vh auto;padding:28px;background:#111;color:#eee;border:1px solid #333;border-radius:14px'><h1>Wrong URL format</h1><p>There is no u1 account slot. The default account uses the normal URL.</p></main>",{status:400,headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}});url.pathname="/"+parts.slice(0,-1).join("/")}if(request.method==="OPTIONS"){const origin=request.headers.get("origin")||"";if(url.pathname==="/api/me"||url.pathname==="/api/account-slots"||url.pathname==="/api/tcadmin/role-preview"){if(!trustedTcOrigin(origin))return new Response(null,{status:403});return new Response(null,{status:204,headers:{"access-control-allow-origin":origin,"access-control-allow-credentials":"true","access-control-allow-methods":"GET, POST, OPTIONS","access-control-allow-headers":"authorization, content-type","access-control-max-age":"86400","vary":"Origin"}})}return new Response(null,{status:204,headers:{"access-control-allow-origin":origin||"*","access-control-allow-methods":"GET, POST, OPTIONS","access-control-allow-headers":"authorization, content-type","access-control-max-age":"86400","vary":"Origin"}});}
+
+const SUPPORT_TICKET_MAILBOX="support@theegget.com";
+function supportSenderAddress(value){
+  const text=String(value||"");
+  const match=text.match(/<([^<>]+)>/);
+  const address=(match?.[1]||text).trim().replace(/^mailto:/i,"");
+  return /^[^@\\s<>]+@[^@\\s<>]+\\.[^@\\s<>]+$/.test(address)?address.toLowerCase():"";
+}
+async function sendTicketAcknowledgement(ticket,message,env){
+  if(!env.SUPPORT_MAILBOX_PASSWORD)throw new Error("SUPPORT_MAILBOX_PASSWORD is not configured.");
+  const original={message_id:message.email_message_id||"",in_reply_to:""};
+  const bodyText="Your support request has been received.\\n\\nTicket Number: "+ticket.ticket_number+"\\n\\nOur support team will review your request and respond to this email.\\n\\nPlease keep your ticket number for future reference.\\n\\nBest, TC";
+  await sendMailboxReply(SUPPORT_TICKET_MAILBOX,env.SUPPORT_MAILBOX_PASSWORD,ticket.sender_email,"Ticket ["+ticket.ticket_number+"] received: "+ticket.subject,bodyText,original,"Theegget Creations Support",env);
+  await env.TC.prepare("UPDATE support_tickets SET acknowledgement_sent=1,updated_at=? WHERE id=?").bind(new Date().toISOString(),ticket.id).run();
+}
+async function syncSupportTickets(env){
+  const password=env.SUPPORT_MAILBOX_PASSWORD;
+  if(!password)throw new Error("SUPPORT_MAILBOX_PASSWORD is not configured.");
+  const imap=await openImap(SUPPORT_TICKET_MAILBOX,password,env);
+  let imported=0;
+  try{
+    const selected=await imap.command("SELECT INBOX");
+    if(!selected.ok)throw new Error("Could not select the support mailbox INBOX.");
+    const state=await env.TC.prepare("SELECT setting_value FROM support_ticket_settings WHERE setting_key='last_uid'").first();
+    const all=await imap.command("UID SEARCH ALL");
+    const allLine=all.items.find(item=>item.line?.startsWith("* SEARCH"));
+    const allUids=(allLine?.line||"").replace("* SEARCH","").trim().split(/\\s+/).filter(Boolean).map(Number).filter(Number.isSafeInteger);
+    let candidates=[];
+    if(state){
+      const lastUid=Number(state.setting_value)||0;
+      const found=await imap.command("UID SEARCH UID "+(lastUid+1)+":*");
+      const line=found.items.find(item=>item.line?.startsWith("* SEARCH"));
+      candidates=(line?.line||"").replace("* SEARCH","").trim().split(/\\s+/).filter(Boolean).map(Number).filter(Number.isSafeInteger);
+    }else{
+      const unseen=await imap.command("UID SEARCH UNSEEN");
+      const line=unseen.items.find(item=>item.line?.startsWith("* SEARCH"));
+      candidates=(line?.line||"").replace("* SEARCH","").trim().split(/\\s+/).filter(Boolean).map(Number).filter(Number.isSafeInteger);
+    }
+    for(const uid of candidates){
+      const duplicate=await env.TC.prepare("SELECT id FROM support_ticket_messages WHERE mailbox_uid=?").bind(uid).first();
+      if(duplicate)continue;
+      const fetched=await imap.command("UID FETCH "+uid+" (UID BODY.PEEK[])");
+      const raw=fetched.items.find(item=>typeof item.literal==="string")?.literal;
+      if(!fetched.ok||!raw)continue;
+      const mail=parseMail(raw);
+      const sender=supportSenderAddress(mail.from);
+      if(!sender||sender===SUPPORT_TICKET_MAILBOX)continue;
+      const now=new Date().toISOString();
+      const requestedNumber=(mail.subject.match(/\\bTC-([0-9]{6})\\b/i)||[])[0]?.toUpperCase();
+      let ticket=requestedNumber?await env.TC.prepare("SELECT * FROM support_tickets WHERE ticket_number=? AND sender_email=? COLLATE NOCASE").bind(requestedNumber,sender).first():null;
+      let isNew=false;
+      if(!ticket){
+        const inserted=await env.TC.prepare("INSERT INTO support_tickets(sender_email,subject,created_at,updated_at,last_message_at) VALUES(?,?,?,?,?) RETURNING id").bind(sender,mail.subject||"(no subject)",now,now,now).first();
+        const id=Number(inserted?.id);
+        if(!id)throw new Error("Could not create a support ticket.");
+        const number="TC-"+String(id).padStart(6,"0");
+        await env.TC.prepare("UPDATE support_tickets SET ticket_number=? WHERE id=?").bind(number,id).run();
+        ticket={id,ticket_number:number,sender_email:sender,subject:mail.subject||"(no subject)",status:"Open",acknowledgement_sent:0};
+        isNew=true;
+      }
+      await env.TC.prepare("INSERT INTO support_ticket_messages(ticket_id,direction,sender_email,sender_name,body,email_message_id,mailbox_uid,created_at) VALUES(?,'inbound',?,?,?,?,?,?)").bind(ticket.id,sender,mail.from||sender,mail.body||"",mail.message_id||"",uid,now).run();
+      await env.TC.prepare("UPDATE support_tickets SET updated_at=?,last_message_at=?,status=CASE WHEN status IN ('Resolved','Closed') THEN 'Open' ELSE status END WHERE id=?").bind(now,now,ticket.id).run();
+      imported++;
+      if(isNew){
+        try{await sendTicketAcknowledgement(ticket,{email_message_id:mail.message_id},env)}
+        catch(error){console.error("Support ticket acknowledgement failed:",String(error?.message||error))}
+      }
+    }
+    if(allUids.length){
+      const latest=Math.max(...allUids);
+      await env.TC.prepare("INSERT INTO support_ticket_settings(setting_key,setting_value) VALUES('last_uid',?) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value").bind(String(latest)).run();
+    }else if(!state){
+      await env.TC.prepare("INSERT INTO support_ticket_settings(setting_key,setting_value) VALUES('last_uid','0')").run();
+    }
+  }finally{await imap.close()}
+  const pending=await env.TC.prepare("SELECT t.*,m.email_message_id FROM support_tickets t JOIN support_ticket_messages m ON m.id=(SELECT MIN(m2.id) FROM support_ticket_messages m2 WHERE m2.ticket_id=t.id AND m2.direction='inbound') WHERE t.acknowledgement_sent=0 LIMIT 20").all();
+  for(const ticket of pending.results||[]){
+    try{await sendTicketAcknowledgement(ticket,{email_message_id:ticket.email_message_id},env)}
+    catch(error){console.error("Support ticket acknowledgement retry failed:",ticket.ticket_number,String(error?.message||error))}
+  }
+  console.log("Support ticket sync completed:",imported,"new inbound messages.");
+}
+
+export default {async scheduled(controller,env,ctx){await syncSupportTickets(env)},async fetch(request,env){const url=new URL(request.url);const parts=url.pathname.split("/").filter(Boolean),first=(parts[0]||"").match(/^u([0-9]+)$/),last=(parts[parts.length-1]||"").match(/^u([0-9]+)$/);if(first&&parts.length>1)return new Response("<!doctype html><meta charset=utf-8><title>Wrong URL format</title><main style='font:15px system-ui;max-width:520px;margin:12vh auto;padding:28px;background:#111;color:#eee;border:1px solid #333;border-radius:14px'><h1>Wrong URL format</h1><p>The account slot must come after the page name. Move the account slot to the end of the URL.</p></main>",{status:400,headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}});if(last&&parts.length===1)return Response.redirect(new URL("/",url),308);if(last&&parts.length>=2){const n=Number(last[1]);if(n===0){url.pathname="/"+parts.slice(0,-1).join("/");return Response.redirect(url,308)}if(n===1)return new Response("<!doctype html><meta charset=utf-8><title>Wrong URL format</title><main style='font:15px system-ui;max-width:520px;margin:12vh auto;padding:28px;background:#111;color:#eee;border:1px solid #333;border-radius:14px'><h1>Wrong URL format</h1><p>There is no u1 account slot. The default account uses the normal URL.</p></main>",{status:400,headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}});url.pathname="/"+parts.slice(0,-1).join("/")}if(request.method==="OPTIONS"){const origin=request.headers.get("origin")||"";if(url.pathname==="/api/me"||url.pathname==="/api/account-slots"||url.pathname==="/api/tcadmin/role-preview"){if(!trustedTcOrigin(origin))return new Response(null,{status:403});return new Response(null,{status:204,headers:{"access-control-allow-origin":origin,"access-control-allow-credentials":"true","access-control-allow-methods":"GET, POST, OPTIONS","access-control-allow-headers":"authorization, content-type","access-control-max-age":"86400","vary":"Origin"}})}return new Response(null,{status:204,headers:{"access-control-allow-origin":origin||"*","access-control-allow-methods":"GET, POST, OPTIONS","access-control-allow-headers":"authorization, content-type","access-control-max-age":"86400","vary":"Origin"}});}
 if(url.pathname==="/api/health"&&request.method==="GET"){try{const r=await env.TC.prepare("SELECT 1 AS ok").first();return json({service:"TCAccounts API",status:r?.ok===1?"ok":"database_unavailable",environment:env.APP_ENV||"unknown"},r?.ok===1?200:503)}catch{return json({status:"database_unavailable"},503)}}
 if(url.pathname==="/api/register"&&request.method==="POST"){
 const b=await body(request),username=typeof b?.username==="string"?b.username.trim():"",email=typeof b?.email==="string"?b.email.trim().toLowerCase():"",password=typeof b?.password==="string"?b.password:"";
