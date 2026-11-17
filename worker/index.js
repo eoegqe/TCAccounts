@@ -311,12 +311,12 @@ function supportSenderAddress(value){
   const text=String(value||"");
   const match=text.match(/<([^<>]+)>/);
   const address=(match?.[1]||text).trim().replace(/^mailto:/i,"");
-  return /^[^@\\s<>]+@[^@\\s<>]+\\.[^@\\s<>]+$/.test(address)?address.toLowerCase():"";
+  return /^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$/.test(address)?address.toLowerCase():"";
 }
 async function sendTicketAcknowledgement(ticket,message,env){
   if(!env.SUPPORT_MAILBOX_PASSWORD)throw new Error("SUPPORT_MAILBOX_PASSWORD is not configured.");
   const original={message_id:message.email_message_id||"",in_reply_to:""};
-  const bodyText="Your support request has been received.\\n\\nTicket Number: "+ticket.ticket_number+"\\n\\nOur support team will review your request and respond to this email.\\n\\nPlease keep your ticket number for future reference.\\n\\nBest, TC";
+  const bodyText="Your support request has been received.\n\nTicket Number: "+ticket.ticket_number+"\n\nOur support team will review your request and respond to this email.\n\nPlease keep your ticket number for future reference.\n\nBest, TC";
   await sendMailboxReply(SUPPORT_TICKET_MAILBOX,env.SUPPORT_MAILBOX_PASSWORD,ticket.sender_email,"Ticket ["+ticket.ticket_number+"] received: "+ticket.subject,bodyText,original,"Theegget Creations Support",env);
   await env.TC.prepare("UPDATE support_tickets SET acknowledgement_sent=1,updated_at=? WHERE id=?").bind(new Date().toISOString(),ticket.id).run();
 }
@@ -331,17 +331,17 @@ async function syncSupportTickets(env){
     const state=await env.TC.prepare("SELECT setting_value FROM support_ticket_settings WHERE setting_key='last_uid'").first();
     const all=await imap.command("UID SEARCH ALL");
     const allLine=all.items.find(item=>item.line?.startsWith("* SEARCH"));
-    const allUids=(allLine?.line||"").replace("* SEARCH","").trim().split(/\\s+/).filter(Boolean).map(Number).filter(Number.isSafeInteger);
+    const allUids=(allLine?.line||"").replace("* SEARCH","").trim().split(/\s+/).filter(Boolean).map(Number).filter(Number.isSafeInteger);
     let candidates=[];
     if(state){
       const lastUid=Number(state.setting_value)||0;
       const found=await imap.command("UID SEARCH UID "+(lastUid+1)+":*");
       const line=found.items.find(item=>item.line?.startsWith("* SEARCH"));
-      candidates=(line?.line||"").replace("* SEARCH","").trim().split(/\\s+/).filter(Boolean).map(Number).filter(Number.isSafeInteger);
+      candidates=(line?.line||"").replace("* SEARCH","").trim().split(/\s+/).filter(Boolean).map(Number).filter(Number.isSafeInteger);
     }else{
       const unseen=await imap.command("UID SEARCH UNSEEN");
       const line=unseen.items.find(item=>item.line?.startsWith("* SEARCH"));
-      candidates=(line?.line||"").replace("* SEARCH","").trim().split(/\\s+/).filter(Boolean).map(Number).filter(Number.isSafeInteger);
+      candidates=(line?.line||"").replace("* SEARCH","").trim().split(/\s+/).filter(Boolean).map(Number).filter(Number.isSafeInteger);
     }
     for(const uid of candidates){
       const duplicate=await env.TC.prepare("SELECT id FROM support_ticket_messages WHERE mailbox_uid=?").bind(uid).first();
@@ -353,7 +353,7 @@ async function syncSupportTickets(env){
       const sender=supportSenderAddress(mail.from);
       if(!sender||sender===SUPPORT_TICKET_MAILBOX)continue;
       const now=new Date().toISOString();
-      const requestedNumber=(mail.subject.match(/\\bTC-([0-9]{6})\\b/i)||[])[0]?.toUpperCase();
+      const requestedNumber=(mail.subject.match(/\bTC-([0-9]{6})\b/i)||[])[0]?.toUpperCase();
       let ticket=requestedNumber?await env.TC.prepare("SELECT * FROM support_tickets WHERE ticket_number=? AND sender_email=? COLLATE NOCASE").bind(requestedNumber,sender).first():null;
       let isNew=false;
       if(!ticket){
