@@ -576,6 +576,59 @@ if(!clientId||!redirectUri||!state||!challenge||method!=="S256")return json({err
 const u=await session(request,env);if(!u){console.log("OAuth approval: session missing; redirecting to sign-in");const original=new URL("/oauth/authorize",url.origin);const slot=accountSlotFromRequest(request);if(slot>=2)original.pathname+="/u"+slot;for(const key of ["client_id","redirect_uri","response_type","scope","state","code_challenge","code_challenge_method","oauth_started_at"]){const value=p.get(key);if(value!==null)original.searchParams.set(key,value)}const login=new URL("/login"+(slot>=2?"/u"+slot:""),url.origin);login.searchParams.set("return_to",original.pathname+original.search);console.log("OAuth approval requires a fresh login");return Response.redirect(login.toString(),303);}
 try{console.log("OAuth approval: session present; validating client and saving authorization code");const client=await env.TC.prepare("SELECT name,redirect_uris_json,scopes_json FROM oauth_clients WHERE client_id=?").bind(clientId).first();if(!client)return json({error:"invalid_client"},400);if(!JSON.parse(client.redirect_uris_json).includes(redirectUri)||scope.some(s=>!JSON.parse(client.scopes_json).includes(s)||!["profile","email"].includes(s)))return json({error:"invalid_request"},400);const code=random(32),now=new Date().toISOString(),expires=new Date(Date.now()+300000).toISOString();await env.TC.prepare("INSERT INTO oauth_codes(code_hash,client_id,user_id,redirect_uri,scope,code_challenge,code_challenge_method,expires_at,created_at) VALUES(?,?,?,?,?,?,?,?,?)").bind(await hash(code),clientId,u.user_id,redirectUri,scope.join(" "),challenge,"S256",expires,now).run();let firstPartyApplication=false;try{const destination=new URL(redirectUri);firstPartyApplication=(destination.protocol==="https:"&&(destination.hostname==="theegget.com"||destination.hostname.endsWith(".theegget.com")))||["tac:","eggsys:","tc:"].includes(destination.protocol)}catch{}const sessionStartedAt=Date.parse(u.created_at||"");const authorizationStartedAt=/^\d{13}$/.test(oauthStartedAt)?Number(oauthStartedAt):NaN;const signedInDuringOAuth=Number.isFinite(sessionStartedAt)&&Number.isFinite(authorizationStartedAt)&&sessionStartedAt>authorizationStartedAt;if(!firstPartyApplication&&signedInDuringOAuth){try{const template=TC_NOTIFICATION_TEMPLATES.applicationAuthorized;await sendEventNotification(env,u,template.subject,template.render({username:u.username,application:client.name}))}catch(e){console.error("TC application-authorization notification failed:",String(e?.message||e))}}const target=new URL(redirectUri);target.searchParams.set("code",code);target.searchParams.set("state",state);const destination=target.toString();const safeDestination=destination.replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");console.log("OAuth approval: authorization code saved; redirecting browser to "+target.origin+target.pathname);return new Response('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="0;url='+safeDestination+'"><title>Continuing sign-in…</title></head><body style="margin:0;background:#080808;color:#f5f5f5;font:15px system-ui;display:grid;min-height:100vh;place-items:center"><main style="padding:24px;text-align:center"><p>Approval complete. Returning to the application…</p><a style="color:#fff" href="'+safeDestination+'">Continue</a></main><script>window.location.replace('+JSON.stringify(destination)+')</script></body></html>',{status:200,headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store","referrer-policy":"no-referrer","content-security-policy":"default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; base-uri \'none\'; frame-ancestors \'none\'"}})}catch(e){console.error("OAuth approval failed:",String(e?.stack||e?.message||e));return new Response('<!doctype html><meta charset="utf-8"><title>Authorization failed</title><main style="font:15px system-ui;max-width:520px;margin:12vh auto;padding:24px;color:#eee;background:#111;border:1px solid #333;border-radius:14px"><h1>Authorization could not be completed</h1><p>TC Accounts could not save this approval. Return to the application and try again.</p><a style="color:#fff" href="/login">Sign in again</a></main>',{status:503,headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}})}}
 
+
+if(url.pathname.startsWith("/api/support/tickets/")){
+const origin=request.headers.get("origin")||"";
+if(request.method!=="POST")return supportJson(origin,{error:"method_not_allowed"},405);
+const auth=await authorizeSupportMailbox(request,env);if(auth.error)return auth.error;
+const b=await body(request)||{};
+try{
+if(url.pathname==="/api/support/tickets/list"){
+const result=await env.TC.prepare("SELECT t.*,u.username AS assigned_username,(SELECT body FROM support_ticket_messages m WHERE m.ticket_id=t.id ORDER BY m.id DESC LIMIT 1) AS latest_message,(SELECT COUNT(*) FROM support_ticket_messages m WHERE m.ticket_id=t.id) AS message_count FROM support_tickets t LEFT JOIN users u ON u.id=t.assigned_admin_id ORDER BY CASE t.status WHEN 'Open' THEN 0 WHEN 'In Progress' THEN 1 WHEN 'Waiting for User' THEN 2 WHEN 'Resolved' THEN 3 ELSE 4 END,t.last_message_at DESC LIMIT 200").all();
+return supportJson(auth.origin,{tickets:result.results||[]});
+}
+const ticketId=Number(b.ticket_id);
+if(!Number.isSafeInteger(ticketId)||ticketId<1)return supportJson(auth.origin,{error:"invalid_ticket"},400);
+const ticket=await env.TC.prepare("SELECT * FROM support_tickets WHERE id=?").bind(ticketId).first();
+if(!ticket)return supportJson(auth.origin,{error:"ticket_not_found"},404);
+if(url.pathname==="/api/support/tickets/messages"){
+const messages=await env.TC.prepare("SELECT id,direction,sender_email,sender_name,body,created_at FROM support_ticket_messages WHERE ticket_id=? ORDER BY id ASC").bind(ticketId).all();
+return supportJson(auth.origin,{ticket,messages:messages.results||[]});
+}
+if(url.pathname==="/api/support/tickets/claim"){
+const now=new Date().toISOString();
+const claimed=await env.TC.prepare("UPDATE support_tickets SET assigned_admin_id=?,assigned_admin_username=?,status=CASE WHEN status='Open' THEN 'In Progress' ELSE status END,updated_at=? WHERE id=? AND assigned_admin_id IS NULL").bind(auth.account.id,auth.account.username,now,ticketId).run();
+if(!claimed.meta?.changes)return supportJson(auth.origin,{error:"already_assigned",message:"This ticket has already been claimed and cannot be reassigned."},409);
+return supportJson(auth.origin,{success:true,message:"Ticket claimed by you."});
+}
+if(ticket.assigned_admin_id!==auth.account.id)return supportJson(auth.origin,{error:"not_assigned_to_you",message:"Only the admin assigned to this ticket can change its status or reply."},403);
+if(url.pathname==="/api/support/tickets/status"){
+const status=String(b.status||"");
+if(!["Open","In Progress","Waiting for User","Resolved","Closed"].includes(status))return supportJson(auth.origin,{error:"invalid_status"},400);
+await env.TC.prepare("UPDATE support_tickets SET status=?,updated_at=? WHERE id=? AND assigned_admin_id=?").bind(status,new Date().toISOString(),ticketId,auth.account.id).run();
+return supportJson(auth.origin,{success:true,status});
+}
+if(url.pathname==="/api/support/tickets/reply"){
+const message=typeof b.message==="string"?b.message.trim():"";
+if(!message||message.length>20000)return supportJson(auth.origin,{error:"invalid_reply",message:"Enter a reply of up to 20,000 characters."},400);
+if(!env.SUPPORT_MAILBOX_PASSWORD)return supportJson(auth.origin,{error:"mailbox_not_configured",message:"The support mailbox password has not been configured on the server."},503);
+const latest=await env.TC.prepare("SELECT email_message_id FROM support_ticket_messages WHERE ticket_id=? AND direction='inbound' ORDER BY id DESC LIMIT 1").bind(ticketId).first();
+const original={message_id:latest?.email_message_id||"",in_reply_to:""};
+const subject="["+ticket.ticket_number+"] Re: "+ticket.subject;
+const outgoing=message+"\\n\\nBest, TC";
+await sendMailboxReply(SUPPORT_TICKET_MAILBOX,env.SUPPORT_MAILBOX_PASSWORD,ticket.sender_email,subject,outgoing,original,"Theegget Creations Support",env);
+const now=new Date().toISOString();
+await env.TC.prepare("INSERT INTO support_ticket_messages(ticket_id,direction,sender_email,sender_name,body,created_at) VALUES(?,'outbound',?,?,?,?)").bind(ticketId,SUPPORT_TICKET_MAILBOX,"Theegget Creations Support",message,now).run();
+await env.TC.prepare("UPDATE support_tickets SET status='Waiting for User',updated_at=?,last_message_at=? WHERE id=? AND assigned_admin_id=?").bind(now,now,ticketId,auth.account.id).run();
+return supportJson(auth.origin,{success:true,message:"Reply sent."});
+}
+return supportJson(auth.origin,{error:"not_found"},404);
+}catch(e){
+console.error("Support ticket request failed:",String(e?.message||e));
+return supportJson(auth.origin,{error:"ticket_operation_failed",message:"The ticket operation could not be completed. Try again."},503);
+}
+}
+
 if(url.pathname.startsWith("/api/support/mailbox/")){
 const origin=request.headers.get("origin")||"";
 if(request.method==="OPTIONS")return origin==="https://admin.theegget.com"?new Response(null,{status:204,headers:{"access-control-allow-origin":origin,"access-control-allow-methods":"POST, OPTIONS","access-control-allow-headers":"authorization, content-type","access-control-max-age":"86400","vary":"Origin"}}):json({error:"origin_not_allowed"},403);
