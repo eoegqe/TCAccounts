@@ -2,6 +2,9 @@ name = "tcaccounts"
 main = "worker/index.js"
 compatibility_date = "2026-10-25"
 
+[triggers]
+crons = ["*/5 * * * *"]
+
 [assets]
 directory = "./dist"
 binding = "ASSETS"
