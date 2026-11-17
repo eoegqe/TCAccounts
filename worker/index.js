@@ -298,7 +298,8 @@ async function sendMailboxReply(email,password,recipient,subject,body,original,s
     const encodedSubject="=?UTF-8?B?"+btoa(unescape(encodeURIComponent(subject)))+"?=";
     const plain=String(body).replace(/\r\n/g,"\n").replace(/\r/g,"\n").replace(/\0/g,"");
     const refs=[original.message_id,original.in_reply_to].filter(Boolean).join(" ");
-    const encodedSenderName="=?UTF-8?B?"+btoa(unescape(encodeURIComponent(String(senderName||"TC Support").replace(/[\\r\\n\\0]/g,"").slice(0,100))))+"?=";\n    const linesOut=["From: "+encodedSenderName+" <"+email+">","To: <"+safeAddress(recipient)+">","Subject: "+encodedSubject,"In-Reply-To: "+String(original.message_id||"").replace(/[\r\n]/g,""),"References: "+refs.replace(/[\r\n]/g,""),"MIME-Version: 1.0","Content-Type: text/plain; charset=UTF-8","Content-Transfer-Encoding: base64","",btoa(unescape(encodeURIComponent(plain))).replace(/.{1,76}/g,"$&\r\n"),""].join("\r\n");
+    const encodedSenderName="=?UTF-8?B?"+btoa(unescape(encodeURIComponent(String(senderName||"TC Support").replace(/[\r\n\0]/g,"").slice(0,100))))+"?=";
+    const linesOut=["From: "+encodedSenderName+" <"+email+">","To: <"+safeAddress(recipient)+">","Subject: "+encodedSubject,"In-Reply-To: "+String(original.message_id||"").replace(/[\r\n]/g,""),"References: "+refs.replace(/[\r\n]/g,""),"MIME-Version: 1.0","Content-Type: text/plain; charset=UTF-8","Content-Transfer-Encoding: base64","",btoa(unescape(encodeURIComponent(plain))).replace(/.{1,76}/g,"$&\r\n"),""].join("\r\n");
     await writer.write(enc.encode(linesOut.replace(/^\./gm,"..")+"\r\n.\r\n"));
     const accepted=await readReply();if(!accepted.startsWith("250"))throw new Error("SMTP did not accept the reply.");
     try{await command("QUIT",[221])}catch{}
@@ -521,7 +522,8 @@ const original=await mailboxMessage(email,password,uid,env);
 const match=original.from.match(/<([^<>]+)>/),recipient=(match?.[1]||original.from).trim();
 if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(recipient)||recipient.toLowerCase()===email)return supportJson(auth.origin,{error:"invalid_recipient",message:"The original sender address could not be verified."},400);
 const subject=/^re:/i.test(original.subject)?original.subject:"Re: "+original.subject;
-const senderName=String(auth.account.username||"Support")+" From TC";\nawait sendMailboxReply(email,password,recipient,subject,reply,original,senderName,env);
+const senderName=String(auth.account.username||"Support")+" From TC";
+await sendMailboxReply(email,password,recipient,subject,reply,original,senderName,env);
 return supportJson(auth.origin,{success:true,message:"Reply sent to the original sender."});
 }
 return supportJson(auth.origin,{error:"not_found"},404);
