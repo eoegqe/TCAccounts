@@ -102,18 +102,16 @@ function mailboxAddress(value){
 }
 async function authorizeSupportMailbox(request,env){
   const origin=request.headers.get("origin")||"";
+  const cors={"access-control-allow-origin":origin,"vary":"Origin"};
   if(origin!=="https://admin.theegget.com")return {error:json({error:"origin_not_allowed"},403)};
-  const token=(request.headers.get("authorization")||"").replace(/^Bearer\s+/i,"").trim();
-  if(!token)return {error:json({error:"not_authenticated"},401,{"access-control-allow-origin":origin,"vary":"Origin"})};
+  const token=(request.headers.get("authorization")||"").replace(/^Bearer\\s+/i,"").trim();
+  if(!token)return {error:json({error:"not_authenticated"},401,cors)};
   try{
-    const response=await fetch("https://accounts.theegget.com/oauth/userinfo",{headers:{Authorization:"Bearer "+token,Accept:"application/json"},cf:{cacheTtl:0}});
-    if(!response.ok)return {error:json({error:"not_authenticated"},401,{"access-control-allow-origin":origin,"vary":"Origin"})};
-    const identity=await response.json(),id=Number(identity.sub);
-    if(!Number.isSafeInteger(id)||id<1)return {error:json({error:"invalid_identity"},401,{"access-control-allow-origin":origin,"vary":"Origin"})};
-    const account=await env.TC.prepare("SELECT id,username,role,status FROM users WHERE id=?").bind(id).first();
-    if(!account||account.status!=="active"||Number(account.role)<2)return {error:json({error:"staff_only",message:"Support role or higher is required."},403,{"access-control-allow-origin":origin,"vary":"Origin"})};
+    const account=await env.TC.prepare("SELECT u.id,u.username,u.role,u.status FROM oauth_tokens t JOIN users u ON u.id=t.user_id WHERE t.token_hash=? AND t.revoked_at IS NULL AND t.expires_at>? AND u.status='active' AND COALESCE(u.role,1)<>0").bind(await hash(token),new Date().toISOString()).first();
+    if(!account)return {error:json({error:"not_authenticated"},401,cors)};
+    if(Number(account.role)<2)return {error:json({error:"staff_only",message:"Support role or higher is required."},403,cors)};
     return {account,origin};
-  }catch{return {error:json({error:"authorization_unavailable"},503,{"access-control-allow-origin":origin,"vary":"Origin"})}}
+  }catch{return {error:json({error:"authorization_unavailable"},503,cors)}}
 }
 function supportJson(origin,data,status=200){
   return json(data,status,{"access-control-allow-origin":origin,"access-control-allow-methods":"POST, OPTIONS","access-control-allow-headers":"authorization, content-type","vary":"Origin"});
