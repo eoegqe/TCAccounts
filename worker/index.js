@@ -366,7 +366,7 @@ async function syncSupportTickets(env){
         isNew=true;
       }
       await env.TC.prepare("INSERT INTO support_ticket_messages(ticket_id,direction,sender_email,sender_name,body,email_message_id,mailbox_uid,created_at) VALUES(?,'inbound',?,?,?,?,?,?)").bind(ticket.id,sender,mail.from||sender,mail.body||"",mail.message_id||"",uid,now).run();
-      await env.TC.prepare("UPDATE support_tickets SET updated_at=?,last_message_at=?,status=CASE WHEN status IN ('Resolved','Closed') THEN 'Open' ELSE status END WHERE id=?").bind(now,now,ticket.id).run();
+      await env.TC.prepare("UPDATE support_tickets SET updated_at=?,last_message_at=?,status=CASE WHEN assigned_admin_id IS NULL THEN 'Open' ELSE 'In Progress' END WHERE id=?").bind(now,now,ticket.id).run();
       imported++;
       if(isNew){
         try{await sendTicketAcknowledgement(ticket,{email_message_id:mail.message_id},env)}
@@ -615,10 +615,10 @@ if(!env.SUPPORT_MAILBOX_PASSWORD)return supportJson(auth.origin,{error:"mailbox_
 const latest=await env.TC.prepare("SELECT email_message_id FROM support_ticket_messages WHERE ticket_id=? AND direction='inbound' ORDER BY id DESC LIMIT 1").bind(ticketId).first();
 const original={message_id:latest?.email_message_id||"",in_reply_to:""};
 const subject="["+ticket.ticket_number+"] Re: "+ticket.subject;
-const outgoing=message+"\\n\\nBest, TC";
+const outgoing=message+"\n\nBest, TC";
 await sendMailboxReply(SUPPORT_TICKET_MAILBOX,env.SUPPORT_MAILBOX_PASSWORD,ticket.sender_email,subject,outgoing,original,"Theegget Creations Support",env);
 const now=new Date().toISOString();
-await env.TC.prepare("INSERT INTO support_ticket_messages(ticket_id,direction,sender_email,sender_name,body,created_at) VALUES(?,'outbound',?,?,?,?)").bind(ticketId,SUPPORT_TICKET_MAILBOX,"Theegget Creations Support",message,now).run();
+await env.TC.prepare("INSERT INTO support_ticket_messages(ticket_id,direction,sender_email,sender_name,body,created_at) VALUES(?,'outbound',?,?,?,?)").bind(ticketId,SUPPORT_TICKET_MAILBOX,"Theegget Creations Support",outgoing,now).run();
 await env.TC.prepare("UPDATE support_tickets SET status='Waiting for User',updated_at=?,last_message_at=? WHERE id=? AND assigned_admin_id=?").bind(now,now,ticketId,auth.account.id).run();
 return supportJson(auth.origin,{success:true,message:"Reply sent."});
 }
