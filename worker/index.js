@@ -374,7 +374,7 @@ async function syncSupportTickets(env){
       }
     }
     if(allUids.length){
-      const latest=Math.max(...allUids);
+      const latest=allUids.reduce((maximum,uid)=>Math.max(maximum,uid),0);
       await env.TC.prepare("INSERT INTO support_ticket_settings(setting_key,setting_value) VALUES('last_uid',?) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value").bind(String(latest)).run();
     }else if(!state){
       await env.TC.prepare("INSERT INTO support_ticket_settings(setting_key,setting_value) VALUES('last_uid','0')").run();
