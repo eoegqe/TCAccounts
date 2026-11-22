@@ -316,8 +316,9 @@ function supportSenderAddress(value){
 async function sendTicketAcknowledgement(ticket,message,env){
   if(!env.SUPPORT_MAILBOX_PASSWORD)throw new Error("SUPPORT_MAILBOX_PASSWORD is not configured.");
   const original={message_id:message.email_message_id||"",in_reply_to:""};
-  const bodyText="Your support request has been received.\n\nTicket Number: "+ticket.ticket_number+"\n\nOur support team will review your request and respond to this email.\n\nPlease keep your ticket number for future reference.\n\nBest, TC";
+  const bodyText="Your email has been received by Theegget Creations Support.\n\nTicket Number: "+ticket.ticket_number+"\n\nOur support team will review your message and respond as soon as possible.\n\nPlease include your ticket number in future replies.\n\nBest, TC";
   await sendMailboxReply(SUPPORT_TICKET_MAILBOX,env.SUPPORT_MAILBOX_PASSWORD,ticket.sender_email,"Ticket ["+ticket.ticket_number+"] received: "+ticket.subject,bodyText,original,"Theegget Creations Support",env);
+  await env.TC.prepare("UPDATE support_ticket_messages SET acknowledgement_sent=1 WHERE id=?").bind(message.id).run();
   await env.TC.prepare("UPDATE support_tickets SET acknowledgement_sent=1,updated_at=? WHERE id=?").bind(new Date().toISOString(),ticket.id).run();
 }
 async function syncSupportTickets(env){
@@ -365,13 +366,11 @@ async function syncSupportTickets(env){
         ticket={id,ticket_number:number,sender_email:sender,subject:mail.subject||"(no subject)",status:"Open",acknowledgement_sent:0};
         isNew=true;
       }
-      await env.TC.prepare("INSERT INTO support_ticket_messages(ticket_id,direction,sender_email,sender_name,body,email_message_id,mailbox_uid,created_at) VALUES(?,'inbound',?,?,?,?,?,?)").bind(ticket.id,sender,mail.from||sender,mail.body||"",mail.message_id||"",uid,now).run();
+      const insertedMessage=await env.TC.prepare("INSERT INTO support_ticket_messages(ticket_id,direction,sender_email,sender_name,body,email_message_id,mailbox_uid,created_at) VALUES(?,'inbound',?,?,?,?,?,?) RETURNING id").bind(ticket.id,sender,mail.from||sender,mail.body||"",mail.message_id||"",uid,now).first();
       await env.TC.prepare("UPDATE support_tickets SET updated_at=?,last_message_at=?,status=CASE WHEN assigned_admin_id IS NULL THEN 'Open' ELSE 'In Progress' END WHERE id=?").bind(now,now,ticket.id).run();
       imported++;
-      if(isNew){
-        try{await sendTicketAcknowledgement(ticket,{email_message_id:mail.message_id},env)}
-        catch(error){console.error("Support ticket acknowledgement failed:",String(error?.message||error))}
-      }
+      try{await sendTicketAcknowledgement(ticket,{id:insertedMessage?.id,email_message_id:mail.message_id},env)}
+      catch(error){console.error("Support ticket acknowledgement failed:",ticket.ticket_number,String(error?.message||error))}
     }
     if(allUids.length){
       const latest=allUids.reduce((maximum,uid)=>Math.max(maximum,uid),0);
@@ -380,9 +379,9 @@ async function syncSupportTickets(env){
       await env.TC.prepare("INSERT INTO support_ticket_settings(setting_key,setting_value) VALUES('last_uid','0')").run();
     }
   }finally{await imap.close()}
-  const pending=await env.TC.prepare("SELECT t.*,m.email_message_id FROM support_tickets t JOIN support_ticket_messages m ON m.id=(SELECT MIN(m2.id) FROM support_ticket_messages m2 WHERE m2.ticket_id=t.id AND m2.direction='inbound') WHERE t.acknowledgement_sent=0 LIMIT 20").all();
+  const pending=await env.TC.prepare("SELECT t.*,m.id AS inbound_message_id,m.email_message_id FROM support_tickets t JOIN support_ticket_messages m ON m.ticket_id=t.id WHERE m.direction='inbound' AND m.acknowledgement_sent=0 ORDER BY m.id ASC LIMIT 20").all();
   for(const ticket of pending.results||[]){
-    try{await sendTicketAcknowledgement(ticket,{email_message_id:ticket.email_message_id},env)}
+    try{await sendTicketAcknowledgement(ticket,{id:ticket.inbound_message_id,email_message_id:ticket.email_message_id},env)}
     catch(error){console.error("Support ticket acknowledgement retry failed:",ticket.ticket_number,String(error?.message||error))}
   }
   console.log("Support ticket sync completed:",imported,"new inbound messages.");
