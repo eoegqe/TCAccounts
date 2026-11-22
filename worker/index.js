@@ -314,16 +314,16 @@ function supportSenderAddress(value){
   return /^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$/.test(address)?address.toLowerCase():"";
 }
 async function sendTicketAcknowledgement(ticket,message,env){
-  if(!env.SUPPORT_MAILBOX_PASSWORD)throw new Error("SUPPORT_MAILBOX_PASSWORD is not configured.");
+  if(!env.IONOS_SMTP_PASSWORD)throw new Error("IONOS_SMTP_PASSWORD is not configured.");
   const original={message_id:message.email_message_id||"",in_reply_to:""};
   const bodyText="Your email has been received by Theegget Creations Support.\n\nTicket Number: "+ticket.ticket_number+"\n\nOur support team will review your message and respond as soon as possible.\n\nPlease include your ticket number in future replies.\n\nBest, TC";
-  await sendMailboxReply(SUPPORT_TICKET_MAILBOX,env.SUPPORT_MAILBOX_PASSWORD,ticket.sender_email,"Ticket ["+ticket.ticket_number+"] received: "+ticket.subject,bodyText,original,"Theegget Creations Support",env);
+  await sendMailboxReply(SUPPORT_TICKET_MAILBOX,env.IONOS_SMTP_PASSWORD,ticket.sender_email,"Ticket ["+ticket.ticket_number+"] received: "+ticket.subject,bodyText,original,"Theegget Creations Support",env);
   await env.TC.prepare("UPDATE support_ticket_messages SET acknowledgement_sent=1 WHERE id=?").bind(message.id).run();
   await env.TC.prepare("UPDATE support_tickets SET acknowledgement_sent=1,updated_at=? WHERE id=?").bind(new Date().toISOString(),ticket.id).run();
 }
 async function syncSupportTickets(env){
-  const password=env.SUPPORT_MAILBOX_PASSWORD;
-  if(!password)throw new Error("SUPPORT_MAILBOX_PASSWORD is not configured.");
+  const password=env.IONOS_SMTP_PASSWORD;
+  if(!password)throw new Error("IONOS_SMTP_PASSWORD is not configured.");
   const imap=await openImap(SUPPORT_TICKET_MAILBOX,password,env);
   let imported=0;
   try{
@@ -610,12 +610,12 @@ return supportJson(auth.origin,{success:true,status});
 if(url.pathname==="/api/support/tickets/reply"){
 const message=typeof b.message==="string"?b.message.trim():"";
 if(!message||message.length>20000)return supportJson(auth.origin,{error:"invalid_reply",message:"Enter a reply of up to 20,000 characters."},400);
-if(!env.SUPPORT_MAILBOX_PASSWORD)return supportJson(auth.origin,{error:"mailbox_not_configured",message:"The support mailbox password has not been configured on the server."},503);
+if(!env.IONOS_SMTP_PASSWORD)return supportJson(auth.origin,{error:"mailbox_not_configured",message:"The support mailbox password has not been configured on the server."},503);
 const latest=await env.TC.prepare("SELECT email_message_id FROM support_ticket_messages WHERE ticket_id=? AND direction='inbound' ORDER BY id DESC LIMIT 1").bind(ticketId).first();
 const original={message_id:latest?.email_message_id||"",in_reply_to:""};
 const subject="["+ticket.ticket_number+"] Re: "+ticket.subject;
 const outgoing=message+"\n\nBest, TC";
-await sendMailboxReply(SUPPORT_TICKET_MAILBOX,env.SUPPORT_MAILBOX_PASSWORD,ticket.sender_email,subject,outgoing,original,"Theegget Creations Support",env);
+await sendMailboxReply(SUPPORT_TICKET_MAILBOX,env.IONOS_SMTP_PASSWORD,ticket.sender_email,subject,outgoing,original,"Theegget Creations Support",env);
 const now=new Date().toISOString();
 await env.TC.prepare("INSERT INTO support_ticket_messages(ticket_id,direction,sender_email,sender_name,body,created_at) VALUES(?,'outbound',?,?,?,?)").bind(ticketId,SUPPORT_TICKET_MAILBOX,"Theegget Creations Support",outgoing,now).run();
 await env.TC.prepare("UPDATE support_tickets SET status='Waiting for User',updated_at=?,last_message_at=? WHERE id=? AND assigned_admin_id=?").bind(now,now,ticketId,auth.account.id).run();
