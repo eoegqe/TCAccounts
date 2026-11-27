@@ -8,7 +8,9 @@ CREATE TABLE IF NOT EXISTS users (
   email_verified_at TEXT,
   status TEXT NOT NULL CHECK (status IN ('active', 'suspended', 'deleted')),
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  display_name TEXT,
+  bio TEXT
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_unique ON users(username COLLATE NOCASE);
