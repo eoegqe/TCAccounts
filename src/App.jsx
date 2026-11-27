@@ -513,7 +513,7 @@ export default function App() {
             <h2 className="section-title">Register an application</h2>
             <form onSubmit={createOAuthClient}>
               <TextField label="Application name" value={clientName} onChange={event => setClientName(event.target.value)} placeholder="Eggser Control Center" minLength={2} maxLength={80} />
-              <label className="field"><span>Redirect URLs (one per line)</span><textarea required rows={3} value={redirectUris} onChange={event => setRedirectUris(event.target.value)} placeholder="https://your-app.example/oauth/callback" /></label>
+              <label className="field"><span>Redirect URLs (one per line)</span><textarea required rows={3} value={redirectUris} onChange={event => setRedirectUris(event.target.value)} placeholder="https://your-app.example/oauth/callback" /></label>\n              <label className="field"><span>OAuth permissions</span>{["profile.read","profile.bio.read","profile.avatar.read","profile.banner.read","profile.display_name.read","profile.username.read","account.id.read","account.created_at.read","account.status.read","account.verified.read","account.email.read","account.locale.read","account.preferences.read","account.preferences.write"].map(scope => <label key={scope}><input type="checkbox" checked={oauthScopes.includes(scope)} onChange={event => setOauthScopes(items => event.target.checked ? [...items,scope] : items.filter(item => item!==scope))}/> {scope}</label>)}</label>
               <button className="button" type="submit" disabled={clientBusy}>{clientBusy ? "Registering…" : "Register application"} <span>→</span></button>
             </form>
             <h2 className="section-title">Your applications</h2>
