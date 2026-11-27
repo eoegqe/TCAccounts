@@ -177,7 +177,8 @@ function parseMail(raw){
     }
     if(filenameMatch||/attachment/i.test(disposition)){
       const filename=decodeHeader(filenameMatch?.[1]||"attachment");
-      const binary=body.replace(/\r\n$/,"");      attachments.push({filename,content_type:(h["content-type"]||"application/octet-stream").split(";")[0],size:/^base64$/i.test(transfer)?Math.floor(binary.replace(/\s/g,"").length*3/4):binary.length,content_base64:/^base64$/i.test(transfer)?binary.replace(/\s/g,""):btoa(binary)});
+      const binary=body.replace(/\r\n$/,"");
+      attachments.push({filename,content_type:(h["content-type"]||"application/octet-stream").split(";")[0],size:/^base64$/i.test(transfer)?Math.floor(binary.replace(/\s/g,"").length*3/4):binary.length,content_base64:/^base64$/i.test(transfer)?binary.replace(/\s/g,""):btoa(binary)});
       return;
     }
     if(type.startsWith("text/plain"))text+=decodePartBody(body,transfer);
@@ -356,7 +357,8 @@ async function syncSupportTickets(env){
       const now=new Date().toISOString();
       const requestedNumber=(mail.subject.match(/\bTC-([0-9]{6})\b/i)||[])[0]?.toUpperCase();
       let ticket=requestedNumber?await env.TC.prepare("SELECT * FROM support_tickets WHERE ticket_number=? AND sender_email=? COLLATE NOCASE").bind(requestedNumber,sender).first():null;
-      let isNew=false;      if(!ticket){
+      let isNew=false;
+      if(!ticket){
         const inserted=await env.TC.prepare("INSERT INTO support_tickets(sender_email,subject,created_at,updated_at,last_message_at) VALUES(?,?,?,?,?) RETURNING id").bind(sender,mail.subject||"(no subject)",now,now,now).first();
         const id=Number(inserted?.id);
         if(!id)throw new Error("Could not create a support ticket.");
