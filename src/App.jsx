@@ -140,6 +140,9 @@ export default function App() {
   const [redirectUris, setRedirectUris] = useState(() => getRegistrationDefaults().redirectUri);
   const [clientBusy, setClientBusy] = useState(false);
   const [accountSection, setAccountSection] = useState("overview");
+  const [profileDraft, setProfileDraft] = useState({bio:"",avatar_url:"",banner_url:"",display_name:"",locale:"en"});
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [oauthScopes, setOauthScopes] = useState(["profile.read","profile.bio.read","profile.avatar.read","account.id.read"]);
   const [adminPreviewRole, setAdminPreviewRole] = useState("");
   const [adminPreviewBusy, setAdminPreviewBusy] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -432,7 +435,7 @@ export default function App() {
     } finally { setEmailChangeBusy(false); }
   }
 
-  async function createOAuthClient(event) {
+  async function saveProfile(event) {\n    event.preventDefault(); setProfileBusy(true); setMessage("");\n    try { const result = await request("/profile", {method:"PATCH",body:JSON.stringify(profileDraft)}); setUser(current => ({...current,...result.profile})); setMessage("Your profile has been updated."); setMessageType("info"); } catch(error) { setMessage(error.message || "Your profile could not be updated."); setMessageType("error"); } finally { setProfileBusy(false); }\n  }\n\n  async function createOAuthClient(event) {
     event.preventDefault();
     setClientBusy(true);
     setMessage("");
@@ -442,7 +445,7 @@ export default function App() {
         body: JSON.stringify({
           name: clientName.trim(),
           redirect_uris: redirectUris.split(/\r?\n/).map(value => value.trim()).filter(Boolean),
-          scopes: ["profile", "email"]
+          scopes: oauthScopes
         })
       });
       setOauthClients(items => [result.client, ...items]);
@@ -570,11 +573,11 @@ export default function App() {
             </section>
             <nav className="account-actions">
               <button className={accountSection === "overview" ? "selected" : ""} onClick={() => setAccountSection("overview")}>Overview</button>
-              <button className={accountSection === "security" ? "selected" : ""} onClick={() => setAccountSection("security")}>Security</button>
+              <button className={accountSection === "profile" ? "selected" : ""} onClick={() => setAccountSection("profile")}>Profile</button>\n              <button className={accountSection === "security" ? "selected" : ""} onClick={() => setAccountSection("security")}>Security</button>
               {isOwnerAccount(user) && <button className={accountSection === "developer" ? "selected" : ""} onClick={() => setAccountSection("developer")}>Developer</button>}
               <a href={slotPath("/auth", activeSlot)}>Connected apps ↗</a>
             </nav>
-            {accountSection === "security" && (
+            {accountSection === "profile" && <section className="security-section"><h2 className="section-title">Public profile</h2><form onSubmit={saveProfile}><TextField label="Display name" value={profileDraft.display_name} onChange={event=>setProfileDraft({...profileDraft,display_name:event.target.value})} maxLength={80} placeholder={user.username}/><label className="field"><span>Biography (500 characters max)</span><textarea rows={4} maxLength={500} value={profileDraft.bio} onChange={event=>setProfileDraft({...profileDraft,bio:event.target.value})}/></label><TextField label="Avatar image URL (HTTPS)" value={profileDraft.avatar_url} onChange={event=>setProfileDraft({...profileDraft,avatar_url:event.target.value})} placeholder="https://example.com/avatar.png"/><TextField label="Banner image URL (HTTPS)" value={profileDraft.banner_url} onChange={event=>setProfileDraft({...profileDraft,banner_url:event.target.value})} placeholder="https://example.com/banner.png"/><TextField label="Language preference" value={profileDraft.locale} onChange={event=>setProfileDraft({...profileDraft,locale:event.target.value})} maxLength={20}/><button className="button" type="submit" disabled={profileBusy}>{profileBusy?"Saving…":"Save profile"}</button></form></section>}\n            {accountSection === "security" && (
               <div className="security-section">
                 <h2 className="section-title">Email two-factor authentication</h2>
                 <p className="muted">When enabled, TC Accounts will email a one-time code after your password is accepted on a new sign-in.</p>
